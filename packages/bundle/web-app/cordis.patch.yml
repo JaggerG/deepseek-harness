@@ -441,6 +441,10 @@
     - id: ui-jobs
       name: '@deepseek-ai/dsh-client-ui-jobs'
 
+    # Workspace, Session, and background-job charts in the right Sidebar.
+    - id: ui-status-dashboard
+      name: '@deepseek-ai/dsh-client-ui-status-dashboard'
+
     # Task management and Session reminder catalog over the Host Schedule
     # service mounted above.
     - id: ui-schedule

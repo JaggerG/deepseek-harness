@@ -186,14 +186,23 @@ export function AppFrame({
   // the Windows caption row; neither platform keeps an icon rail.
   const darwin = document.documentElement.dataset.platform === 'darwin'
   const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : SIDEBAR_COLLAPSED
+  // The status panel can own the whole frame beside the sidebar; it only takes
+  // over once its occupant has reported a visible panel. The conversation is
+  // kept mounted behind a zero-width centre so nothing it holds is lost.
+  const dashboardFull = layoutInfo.dashboardFull && layoutInfo.rightbarShown
+  const fillTracks = (solved: ReturnType<typeof computeColumns>): ReturnType<typeof computeColumns> => (
+    dashboardFull
+      ? { ...solved, center: 0, rightbar: Math.max(0, viewport - solved.sidebar) }
+      : solved
+  )
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
-  const normal = computeColumns(
+  const normal = fillTracks(computeColumns(
     viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference, collapsedWidth, centeredSidebar,
-  )
-  const cols = computeColumns(
+  ))
+  const cols = fillTracks(computeColumns(
     viewport, drawer ? 0 : sidebarPreference, layoutInfo.rightbarTrack ? rightbarPreference : 0, collapsedWidth, centeredSidebar,
-  )
+  ))
   const colsRef = useRef(cols)
   colsRef.current = cols
   const rightbarWidth = useRef(normal.rightbar)
@@ -266,7 +275,9 @@ export function AppFrame({
   // it priced the squeeze itself, the centre column absorbed each width change
   // whole and was corrected two frames later — visible jitter. cols keeps only
   // the discrete decisions (track present, collapse state) and the drag base.
-  const rightbarMax = cols.rightbar === 0 ? 0 : clampWidth(rightbarPreference, RIGHTBAR_MIN, viewport * RIGHTBAR_MAX_RATIO)
+  const rightbarMax = dashboardFull
+    ? cols.rightbar
+    : cols.rightbar === 0 ? 0 : clampWidth(rightbarPreference, RIGHTBAR_MIN, viewport * RIGHTBAR_MAX_RATIO)
   const sidebarWidth = drawer
     ? Math.min(layoutInfo.sidebar || SIDEBAR_DEFAULT, Math.max(0, viewport - 48))
     : cols.sidebar
@@ -293,11 +304,12 @@ export function AppFrame({
         ...(windowsTitlebar
           ? { '--dsh-windows-sidebar-width': `${cols.sidebar}px` } : {}),
         gridTemplateColumns:
-          `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
+          `${cols.sidebar}px minmax(${dashboardFull || cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
       }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-sidebar-drawer={drawer || undefined}
       data-sidebar-instant={drawer && sidebarCollapsed && sidebarTransition.instant || undefined}
+      data-dashboard-full={dashboardFull || undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
       data-rightbar-instant={layoutInfo.rightbarInstant || undefined}
@@ -335,7 +347,7 @@ export function AppFrame({
       )}
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!drawer && !centeredSidebar && !sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+      {!dashboardFull && layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
     </div>

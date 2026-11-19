@@ -28,12 +28,20 @@ export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 export interface ILayout {
   /** Selected central panel from the same root store used by `usePanelInfo`. */
   readonly panelInfo: HostObservable<PanelInfo>
+  /** Whether the right panel currently fills the frame beside the sidebar. */
+  readonly dashboardFull: HostObservable<boolean>
   /**
    * Select a global central panel without changing the current Session.
    * @param panelId - registered main key, or null to show the Conversation.
    * @throws if the selected main key is not registered; preserves the current selection.
    */
   selectPanel(panelId: MainPanelId | null): void
+  /**
+   * Show or hide the frame-filling right panel. The conversation stays mounted
+   * at zero width while it fills, so switching back preserves its state.
+   * @param full - true to let the right panel take every pixel beside the sidebar.
+   */
+  setDashboardFull(full: boolean): void
   /**
    * Start an asynchronous navigation, superseding any earlier pending navigation.
    * @returns a signal aborted by the next navigation or layout disposal; check it before committing UI state.
@@ -61,11 +69,13 @@ export class LayoutController implements ILayout {
    * @param panels - actions of the instance shared with the root entry.
    * @param hasMainPanel - checks the live main-slot registry for a panel id.
    * @param panelInfo - root store's shared central-panel selection source.
+   * @param dashboardFull - root store's frame-filling dashboard flag.
    */
   constructor(
     private readonly panels: PanelActions,
     private readonly hasMainPanel: (id: MainPanelId) => boolean,
     readonly panelInfo: HostObservable<PanelInfo>,
+    readonly dashboardFull: HostObservable<boolean>,
   ) {}
 
   /** Select a global panel or return to the Conversation. */
@@ -75,6 +85,11 @@ export class LayoutController implements ILayout {
     }
     this.navigation.abort()
     this.panels.selectPanel(panelId)
+  }
+
+  /** Fill the frame beside the sidebar with the right panel. */
+  setDashboardFull(full: boolean): void {
+    this.panels.setDashboardFull(full)
   }
 
   /** @returns the new pending navigation's cancellation signal. */

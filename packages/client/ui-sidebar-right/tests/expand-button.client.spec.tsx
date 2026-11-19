@@ -52,6 +52,7 @@ function mountButton(shortcuts: readonly ShortcutCatalogEntry[] = [], mobile = f
     actions: instance.actions,
     // Copy is the dictionary's contract; the key stands in for the translation.
     t: (key: string) => key,
+    setDashboardFull: () => {},
   }
   const view = render(<ExpandButton {...props} />)
   const control = (): HTMLButtonElement | null => view.container.querySelector('[data-sidebar-right-expand]')

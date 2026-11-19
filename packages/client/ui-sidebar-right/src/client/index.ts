@@ -270,7 +270,10 @@ export function apply(ctx: ClientContext): void {
       name: 'conversation.session.header.corner',
       locale: NS,
       store,
-      inject: () => ({ hooks: { shortcuts: ctx.shortcuts.catalog } }),
+      inject: () => ({
+        hooks: { shortcuts: ctx.shortcuts.catalog },
+        setDashboardFull: () => { layout.setDashboardFull(true) },
+      }),
     }, ExpandButton))
     // Stage two for the guide: it declares the chain child it hosts and reads
     // the registry's entry boxes, which an ordinary type has no reason to do.

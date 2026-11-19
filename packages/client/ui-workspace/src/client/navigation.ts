@@ -300,6 +300,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   openSession(target: SessionTarget): void {
+    // Opening a conversation leaves the frame-filling dashboard for the split view.
+    this.ctx.layout.setDashboardFull(false)
     this.replaceMain(target, this.lifetime.signal, 'reveal')
   }
 
@@ -308,6 +310,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     beforeOpen?: (sessionId: SessionId) => void,
     options: Pick<StartSessionOptions, 'agentPreset'> = {},
   ): Promise<void> {
+    this.ctx.layout.setDashboardFull(false)
     return this.openWorkspaceSession(workspaceId, beforeOpen, options)
   }
 
@@ -344,6 +347,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
+    this.ctx.layout.setDashboardFull(false)
     const { agentPreset, ...draft } = options ?? {}
     const draftOptions = options === undefined ? undefined : draft
     const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined

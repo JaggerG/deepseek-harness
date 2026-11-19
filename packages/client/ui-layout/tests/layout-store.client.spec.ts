@@ -21,6 +21,7 @@ describe('createLayoutStore', () => {
         rightbarTrack: false,
         rightbarFullscreen: false,
         rightbarInstant: false,
+        dashboardFull: true,
       },
     })
   })
@@ -86,14 +87,30 @@ describe('main panel selection', () => {
     actions.setSidebar(400)
     actions.openRightbar(true, true)
     actions.closeRightbar()
-    const layoutInfo = store.getSnapshot().layoutInfo
-    for (const activePanelId of [panelA, panelB, null]) {
-      const previousPanelInfo = store.getSnapshot().panelInfo
-      actions.selectPanel(activePanelId)
-      expect(store.getSnapshot().panelInfo).toEqual({ activePanelId })
-      expect(store.getSnapshot().panelInfo).not.toBe(previousPanelInfo)
-      expect(store.getSnapshot().layoutInfo).toBe(layoutInfo)
-    }
+    const layoutBefore = store.getSnapshot().layoutInfo
+    actions.selectPanel(panelA)
+    // Selecting a global panel needs the centre column, so the frame-filling
+    // dashboard is dropped exactly once.
+    expect(store.getSnapshot().panelInfo).toEqual({ activePanelId: panelA })
+    expect(store.getSnapshot().layoutInfo).not.toBe(layoutBefore)
+    expect(store.getSnapshot().layoutInfo.dashboardFull).toBe(false)
+    const splitLayout = store.getSnapshot().layoutInfo
+    const previousPanelInfo = store.getSnapshot().panelInfo
+    actions.selectPanel(panelB)
+    expect(store.getSnapshot().panelInfo).toEqual({ activePanelId: panelB })
+    expect(store.getSnapshot().panelInfo).not.toBe(previousPanelInfo)
+    expect(store.getSnapshot().layoutInfo).toBe(splitLayout)
+    actions.selectPanel(null)
+    expect(store.getSnapshot().panelInfo).toEqual({ activePanelId: null })
+    expect(store.getSnapshot().layoutInfo).toBe(splitLayout)
+  })
+
+  it('sets the frame-filling dashboard without touching the panel selection', () => {
+    const { store, actions } = createLayoutStore().create()
+    const panelInfo = store.getSnapshot().panelInfo
+    actions.setDashboardFull(false)
+    expect(store.getSnapshot().layoutInfo.dashboardFull).toBe(false)
+    expect(store.getSnapshot().panelInfo).toBe(panelInfo)
   })
 
   it('keeps the complete snapshot when selecting the current panel again', () => {

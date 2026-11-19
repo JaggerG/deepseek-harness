@@ -49,6 +49,11 @@ type LayoutInfo = {
   rightbarFullscreen: boolean
   /** Suppress transitions for a fullscreen exit until another geometry action. */
   rightbarInstant: boolean
+  /**
+   * Whether the right panel fills the frame beside the sidebar. The conversation
+   * stays mounted at zero width, so switching back keeps its state.
+   */
+  dashboardFull: boolean
 }
 
 /**
@@ -57,6 +62,7 @@ type LayoutInfo = {
  */
 type LayoutActions = {
   selectPanel: (draft: LayoutState, panelId: MainPanelId | null) => void
+  setDashboardFull: (draft: LayoutState, full: boolean) => void
   retainMainPanels: (draft: LayoutState, panelIds: readonly string[]) => void
   setSidebar: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
@@ -88,12 +94,19 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
         rightbarTrack: false,
         rightbarFullscreen: false,
         rightbarInstant: false,
+        dashboardFull: true,
       },
     }),
     actions: {
       selectPanel: (d, panelId: MainPanelId | null) => {
         d.panelInfo.activePanelId = panelId
+        // A global panel needs the centre column; the dashboard only owns the
+        // whole frame while the conversation (or nothing) is selected.
+        if (panelId !== null) d.layoutInfo.dashboardFull = false
         if (d.layoutInfo.viewportWidth < SIDEBAR_DRAWER_BREAKPOINT) d.layoutInfo.narrowExpanded = false
+      },
+      setDashboardFull: (d, full: boolean) => {
+        d.layoutInfo.dashboardFull = full
       },
       retainMainPanels: (d, panelIds: readonly string[]) => {
         if (d.panelInfo.activePanelId !== null && !panelIds.includes(d.panelInfo.activePanelId)) {

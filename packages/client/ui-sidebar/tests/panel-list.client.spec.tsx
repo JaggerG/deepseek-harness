@@ -43,9 +43,11 @@ async function bench(collapsed = false, track?: TrackProductEvent) {
   locale.setLocale('en')
   const layout = {
     panelInfo: runtime.panelInfo,
+    dashboardFull: { getSnapshot: () => true, subscribe: () => () => {} },
     beginNavigation: vi.fn(() => new AbortController().signal),
     toggleSidebar: vi.fn(),
     selectPanel: vi.fn((activePanelId: MainPanelId | null) => { runtime.panelInfo.set({ activePanelId }) }),
+    setDashboardFull: vi.fn(),
     openRightbar: vi.fn(),
     closeRightbar: vi.fn(),
   } satisfies ILayout

@@ -66,6 +66,9 @@ function resize(width: number): void {
 function mountFrame(windowWidth = frameWidth, content?: AppFrameProps['renderSlot']) {
   vi.stubGlobal('innerWidth', windowWidth)
   const instance = createLayoutStore().create()
+  // These cases describe the split frame; the frame-filling dashboard has its
+  // own case below.
+  instance.actions.setDashboardFull(false)
   const slotCalls: { key: string; props: object; options: RenderOpts | undefined }[] = []
   const renderSlot: AppFrameProps['renderSlot'] = (key, owner, options) => {
     slotCalls.push({ key, props: owner, options })
@@ -441,6 +444,20 @@ describe('AppFrame right panel presentation', () => {
     expect(tracks(frame)).toEqual([280, 0])
     expect(frame.dataset.rightbarFullscreen).toBeUndefined()
     expect(frame.dataset.rightbarInstant).toBeUndefined()
+  })
+
+  it('gives a frame-filling dashboard every pixel beside the sidebar and hides its handle', () => {
+    const { frame, instance, rightOwner } = mountFrame()
+    act(() => { instance.actions.openRightbar(true, false) })
+    act(() => { instance.actions.setDashboardFull(true) })
+    expect(frame.style.gridTemplateColumns).toBe('280px minmax(0px, 1fr) minmax(0px, 1640px)')
+    expect(rightOwner()).toEqual({ width: 1640, viewportWidth: 1920, canShow: true })
+    expect(frame.dataset.dashboardFull).toBe('true')
+    expect(frame.querySelector('[data-side="rightbar"]')).toBeNull()
+    act(() => { instance.actions.setDashboardFull(false) })
+    expect(frame.dataset.dashboardFull).toBeUndefined()
+    expect(rightOwner().width).toBe(864)
+    expect(frame.querySelector('[data-side="rightbar"]')).not.toBeNull()
   })
 
   it.each(['setSidebar', 'toggleSidebar', 'setRightbar', 'viewport', 'open'] as const)('reenables normal transitions after %s', (action) => {
