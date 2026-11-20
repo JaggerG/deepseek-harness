@@ -883,6 +883,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
         <Metric label={t('metric.runningJobs')} value={runningJobs} tone={runningJobs > 0 ? css.valueBusiness : undefined} />
       </div>
 
+      <div className={css.split}>
       <section className={css.card} data-fund-panel>
         <div className={css.sectionHeader}>
           <div>
@@ -1026,6 +1027,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
           </ul>
         )}
       </section>
+      </div>
 
       <section className={css.card}>
         <div className={css.sectionHeader}>

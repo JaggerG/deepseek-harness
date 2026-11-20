@@ -86,9 +86,18 @@
 .metric {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 3px;
   min-width: 0;
+  aspect-ratio: 1;
   padding: 12px 14px;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
 .metric > span {
