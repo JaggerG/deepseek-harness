@@ -110,6 +110,20 @@ function useChartPalette(ref: RefObject<HTMLElement>): ChartPalette {
   return palette
 }
 
+/** 手机窄屏（与 CSS 断点一致）：关闭图表的拖拽框选缩放。 */
+function useCompactViewport(): boolean {
+  const query = '(max-width: 759px)'
+  const [compact, setCompact] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const listener = (): void => { setCompact(media.matches) }
+    listener()
+    media.addEventListener('change', listener)
+    return () => media.removeEventListener('change', listener)
+  }, [])
+  return compact
+}
+
 function toneColor(tone: Tone, palette: ChartPalette): string {
   switch (tone) {
     case 'toneBusiness': return palette.business
@@ -766,6 +780,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
   const container = useRef<HTMLDivElement>(null)
   const palette = useChartPalette(container)
   const [range, setRange] = useState<FundRangeKey>('all')
+  const compact = useCompactViewport()
   const chart = useMemo(() => buildFundChart(fund, range), [fund, range])
   const trendOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
@@ -774,7 +789,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         type: 'line',
         height: CHART_HEIGHT,
         toolbar: { show: false },
-        zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
+        zoom: { enabled: !compact, type: 'x', allowMouseWheelZoom: true },
         animations: { enabled: false },
         parentHeightOffset: 0,
         fontFamily: 'inherit',
@@ -834,7 +849,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         })),
       },
     }
-  }, [chart, palette, t])
+  }, [chart, palette, t, compact])
   const returnOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
     const baseline = {
@@ -847,7 +862,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         type: 'line',
         height: CHART_HEIGHT,
         toolbar: { show: false },
-        zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
+        zoom: { enabled: !compact, type: 'x', allowMouseWheelZoom: true },
         animations: { enabled: false },
         parentHeightOffset: 0,
         fontFamily: 'inherit',
@@ -894,7 +909,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         } : baseline],
       },
     }
-  }, [chart, palette, t])
+  }, [chart, palette, t, compact])
   if (chart === undefined) return <p className={css.emptyBlock}>{t('fund.empty')}</p>
   // 中国习惯：正收益红色，负收益绿色。
   const tone = chart.rangeReturn >= 0 ? css.toneError : css.toneSuccess

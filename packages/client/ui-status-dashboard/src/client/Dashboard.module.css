@@ -646,6 +646,11 @@
     font-size: 14px;
   }
 
+  /* 手机端不需要手动刷新入口。 */
+  .refresh {
+    display: none;
+  }
+
   .page > section,
   .split > section {
     grid-column: 1 / -1;
