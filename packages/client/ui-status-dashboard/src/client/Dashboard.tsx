@@ -223,7 +223,6 @@ interface FundChartGeometry {
   readonly maxValue: number
   readonly costValue: number | undefined
   readonly points: readonly number[]
-  readonly candles: readonly (readonly [number, number, number, number])[]
 }
 
 function emptyCategories(): Record<FileCategory, number> {
@@ -481,11 +480,6 @@ function buildFundChart(fund: FundRecord): FundChartGeometry | undefined {
     maxValue: top * 100,
     costValue: costReturn === undefined ? undefined : costReturn * 100,
     points: returns.map(value => value * 100),
-    // 日净值只有单值，按「前一日为开盘、当日为收盘」合成 K 线（无影线）。
-    candles: returns.map((value, index) => {
-      const open = index === 0 ? value : returns[index - 1] ?? value
-      return [open * 100, Math.max(open, value) * 100, Math.min(open, value) * 100, value * 100]
-    }),
   }
 }
 
@@ -648,23 +642,17 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
     const lineColor = chart.rangeReturn >= 0 ? palette.success : palette.error
     return {
       chart: {
-        type: 'candlestick',
+        type: 'line',
         height: CHART_HEIGHT,
-        toolbar: { show: false },
-        zoom: { enabled: false },
+        toolbar: { show: true, tools: { download: false } },
+        zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
         animations: { enabled: false },
         parentHeightOffset: 0,
         fontFamily: 'inherit',
         redrawOnParentResize: true,
       },
       colors: [lineColor],
-      plotOptions: {
-        candlestick: {
-          colors: { upward: palette.success, downward: palette.error },
-          wick: { useFillColor: true },
-        },
-      },
-      stroke: { width: 1 },
+      stroke: { curve: 'straight', width: 1.8 },
       markers: { size: 0, hover: { size: 3 } },
       dataLabels: { enabled: false },
       legend: { show: false },
@@ -692,11 +680,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       },
       tooltip: {
         x: { show: true },
-        y: {
-          formatter: value => Array.isArray(value)
-            ? value.map(item => `${(item ?? 0) >= 0 ? '+' : ''}${(item ?? 0).toFixed(2)}%`).join(' / ')
-            : `${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)}%`,
-        },
+        y: { formatter: value => `${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)}%` },
       },
       annotations: {
         yaxis: [
@@ -746,8 +730,8 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         <span className={tone}>{rangeLabel}</span>
       </div>
       <div className={css.fundApex} ref={container} role="img" aria-label={`${fund.name} ${rangeLabel}`}>
-        <Chart options={options} series={[{ name: fund.name, data: chart.candles.map(candle => [...candle]) }]}
-          type="candlestick" height={CHART_HEIGHT} width="100%" />
+        <Chart options={options} series={[{ name: fund.name, data: [...chart.points] }]}
+          type="line" height={CHART_HEIGHT} width="100%" />
       </div>
       <div className={css.fundLegend}>
         {chart.costY !== undefined && (
