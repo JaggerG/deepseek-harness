@@ -203,7 +203,7 @@ type FundState =
 interface FundMarker {
   readonly x: number
   readonly y: number
-  readonly category: string
+  readonly index: number
   readonly value: number
   readonly action: 'buy' | 'sell'
   readonly date: string
@@ -447,7 +447,7 @@ function buildFundChart(fund: FundRecord): FundChartGeometry | undefined {
     markers.push({
       x: x(index),
       y: y(value),
-      category: fund.history[index]?.date ?? trade.date,
+      index,
       value: value * 100,
       action: trade.action,
       date: trade.date,
@@ -692,7 +692,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           }]),
         ],
         points: chart.markers.map(marker => ({
-          x: marker.category,
+          x: marker.index,
           y: marker.value,
           marker: {
             size: 3,
