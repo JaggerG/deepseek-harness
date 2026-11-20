@@ -43,7 +43,6 @@ export type DashboardProps =
 const NO_JOBS: readonly JobView[] = []
 const DAILY_AUDIT_PATH = 'scripts/scheduled-reports/logs/daily_audit/state.json'
 const FUND_PANEL_PATH = 'scripts/fund_panel.json'
-const CHART_WIDTH = 320
 const CHART_HEIGHT = 150
 const MAX_DEPTH = 4
 const MAX_DIRECTORIES = 60
@@ -200,29 +199,56 @@ type FundState =
   | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
   | { readonly status: 'ready'; readonly snapshot: FundSnapshot }
 
-interface FundMarker {
+type FundRangeKey = '1m' | '3m' | '6m' | '1y' | 'all'
+
+/** 时间维度：天数为 0 表示全部历史。 */
+const FUND_RANGES: readonly { readonly key: FundRangeKey; readonly days: number }[] = [
+  { key: '1m', days: 30 },
+  { key: '3m', days: 90 },
+  { key: '6m', days: 180 },
+  { key: '1y', days: 365 },
+  { key: 'all', days: 0 },
+]
+
+const FUND_RANGE_LABEL = {
+  '1m': 'fund.range1m',
+  '3m': 'fund.range3m',
+  '6m': 'fund.range6m',
+  '1y': 'fund.range1y',
+  'all': 'fund.rangeAll',
+} as const
+
+const DAY_MS = 86_400_000
+
+interface FundPoint {
   readonly x: number
   readonly y: number
-  readonly index: number
-  readonly value: number
+}
+
+interface FundMarker {
+  /** 净值日期时间戳，正好对齐 datetime 轴。 */
+  readonly x: number
+  /** 交易当日净值。 */
+  readonly y: number
   readonly action: 'buy' | 'sell'
   readonly date: string
   readonly amount: number
 }
 
 interface FundChartGeometry {
-  readonly path: string
-  readonly costY: number | undefined
-  readonly zeroY: number
+  readonly navSeries: readonly FundPoint[]
+  readonly returnUp: readonly FundPoint[]
+  readonly returnDown: readonly FundPoint[]
   readonly markers: readonly FundMarker[]
   readonly labels: readonly FundMarker[]
   readonly startDate: string
   readonly endDate: string
   readonly rangeReturn: number
-  readonly minValue: number
-  readonly maxValue: number
-  readonly costValue: number | undefined
-  readonly points: readonly number[]
+  readonly navMin: number
+  readonly navMax: number
+  readonly returnMin: number
+  readonly returnMax: number
+  readonly costVisible: boolean
 }
 
 function emptyCategories(): Record<FileCategory, number> {
@@ -411,46 +437,39 @@ async function loadFundState(
   }
 }
 
-/** Project a fund's NAV history into a normalized return curve plus trade markers. */
-function buildFundChart(fund: FundRecord): FundChartGeometry | undefined {
-  const first = fund.history[0]
-  const last = fund.history[fund.history.length - 1]
-  if (first === undefined || last === undefined || fund.history.length < 2) return undefined
-  const returns = fund.history.map(point => point.nav / first.nav - 1)
-  const costReturn = fund.holding && fund.cost > 0 ? fund.cost / first.nav - 1 : undefined
-  const values = [...returns, 0]
-  if (costReturn !== undefined) values.push(costReturn)
-  const minimum = Math.min(...values)
-  const maximum = Math.max(...values)
-  const span = maximum - minimum || 0.01
-  const top = maximum + span * 0.08
-  const bottom = minimum - span * 0.08
-  const plotLeft = 4
-  const plotRight = CHART_WIDTH - 4
-  const plotTop = 12
-  const plotBottom = CHART_HEIGHT - 18
-  const x = (index: number): number =>
-    plotLeft + index / (fund.history.length - 1) * (plotRight - plotLeft)
-  const y = (value: number): number =>
-    plotTop + (top - value) / (top - bottom) * (plotBottom - plotTop)
-  const path = fund.history.map((_, index) => {
-    const value = returns[index] ?? 0
-    return `${index === 0 ? 'M' : 'L'}${x(index).toFixed(1)} ${y(value).toFixed(1)}`
-  }).join(' ')
+/** Project a fund's NAV history into a trend series plus a cost-relative return curve. */
+function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometry | undefined {
+  const history = sliceFundHistory(fund.history, range)
+  const first = history[0]
+  const last = history[history.length - 1]
+  if (first === undefined || last === undefined || history.length < 2) return undefined
+  const startTs = toTimestamp(first.date)
+  const endTs = toTimestamp(last.date)
+  const navSeries = history.map(point => ({ x: toTimestamp(point.date), y: point.nav }))
+  const rangeReturn = last.nav / first.nav - 1
+  // 在持时以成本净值作为收益率基准，成本线即 0%；否则按区间起点归一。
+  const costNav = fund.holding && fund.cost > 0 ? fund.cost : undefined
+  const baseNav = costNav ?? first.nav
+  const returnPoints = history.map(point => ({
+    x: toTimestamp(point.date),
+    y: (point.nav / baseNav - 1) * 100,
+  }))
+  const { up, down } = splitReturnBySign(returnPoints)
   const markers: FundMarker[] = []
   const seen = new Set<string>()
   for (const trade of fund.trades) {
-    const index = fund.history.findIndex(point => point.date >= trade.date)
-    if (index < 0 || seen.has(`${trade.date}-${trade.action}`)) continue
-    seen.add(`${trade.date}-${trade.action}`)
-    const value = returns[index] ?? 0
+    const tradeTs = toTimestamp(trade.date)
+    if (tradeTs < startTs || tradeTs > endTs) continue
+    // 交易日期未必落在净值日期上，取当日或之后最近的一条净值。
+    const point = history.find(item => toTimestamp(item.date) >= tradeTs) ?? last
+    const key = `${point.date}-${trade.action}`
+    if (seen.has(key)) continue
+    seen.add(key)
     markers.push({
-      x: x(index),
-      y: y(value),
-      index,
-      value: value * 100,
+      x: toTimestamp(point.date),
+      y: point.nav,
       action: trade.action,
-      date: trade.date,
+      date: point.date,
       amount: trade.amount,
     })
   }
@@ -460,27 +479,73 @@ function buildFundChart(fund: FundRecord): FundChartGeometry | undefined {
   const ranked = [...markers].sort((left, right) =>
     right.amount - left.amount || left.date.localeCompare(right.date))
   const labeled = new Set<string>()
+  const minGap = (endTs - startTs) * 0.12
   for (const candidate of [firstBuy, markers[markers.length - 1], ...ranked]) {
     if (candidate === undefined || labels.length >= 5) continue
     const key = `${candidate.date}-${candidate.action}`
-    if (labeled.has(key) || labels.some(label => Math.abs(label.x - candidate.x) < 34)) continue
+    if (labeled.has(key) || labels.some(label => Math.abs(label.x - candidate.x) < minGap)) continue
     labeled.add(key)
     labels.push(candidate)
   }
+  const navValues = [...navSeries.map(point => point.y), ...markers.map(marker => marker.y)]
+  const navLow = Math.min(...navValues)
+  const navHigh = Math.max(...navValues)
+  const navSpan = navHigh - navLow || navHigh * 0.01 || 0.01
+  const returnValues = [...returnPoints.map(point => point.y), 0]
+  const returnLow = Math.min(...returnValues)
+  const returnHigh = Math.max(...returnValues)
+  const returnSpan = returnHigh - returnLow || 0.01
   return {
-    path,
-    costY: costReturn === undefined ? undefined : y(costReturn),
-    zeroY: y(0),
+    navSeries,
+    returnUp: up,
+    returnDown: down,
     markers,
     labels,
     startDate: first.date,
     endDate: last.date,
-    rangeReturn: returns[returns.length - 1] ?? 0,
-    minValue: bottom * 100,
-    maxValue: top * 100,
-    costValue: costReturn === undefined ? undefined : costReturn * 100,
-    points: returns.map(value => value * 100),
+    rangeReturn,
+    navMin: navLow - navSpan * 0.08,
+    navMax: navHigh + navSpan * 0.08,
+    returnMin: Math.min(returnLow - returnSpan * 0.1, -0.5),
+    returnMax: Math.max(returnHigh + returnSpan * 0.1, 0.5),
+    costVisible: costNav !== undefined,
   }
+}
+
+function toTimestamp(date: string): number {
+  const value = Date.parse(`${date}T00:00:00`)
+  return Number.isNaN(value) ? 0 : value
+}
+
+/** 按时间维度截取净值历史，区间过短时至少保留两个点。 */
+function sliceFundHistory(history: readonly FundNavPoint[], range: FundRangeKey): readonly FundNavPoint[] {
+  const days = FUND_RANGES.find(item => item.key === range)?.days ?? 0
+  const last = history[history.length - 1]
+  if (days <= 0 || last === undefined) return history
+  const cutoff = toTimestamp(last.date) - days * DAY_MS
+  const start = history.findIndex(point => toTimestamp(point.date) >= cutoff)
+  const index = start < 0 ? history.length - 2 : Math.min(start, history.length - 2)
+  return history.slice(Math.max(index, 0))
+}
+
+/** 收益率曲线按零轴拆成涨跌两条序列，用于红涨绿跌着色。 */
+function splitReturnBySign(points: readonly FundPoint[]): { up: FundPoint[]; down: FundPoint[] } {
+  const up: FundPoint[] = []
+  const down: FundPoint[] = []
+  points.forEach((point, index) => {
+    const positive = point.y >= 0
+    if (positive) up.push(point)
+    else down.push(point)
+    const next = points[index + 1]
+    if (next === undefined || (next.y >= 0) === positive) return
+    // 在零轴插入交点，保证红绿两段在视觉上连续。
+    const span = point.y - next.y
+    const fraction = span === 0 ? 0 : point.y / span
+    const crossing = { x: point.x + (next.x - point.x) * fraction, y: 0 }
+    up.push(crossing)
+    down.push(crossing)
+  })
+  return { up, down }
 }
 
 function formatNumber(value: number): string {
@@ -631,15 +696,17 @@ function DonutChart({ title, segments, totalLabel, emptyLabel }: {
   )
 }
 
-/** Return curve with cost line and buy/sell markers for the selected fund. */
+/**
+ * 单只基金两张图：上图为净值走势与买卖点，下图为相对成本的收益率（红涨绿跌）。
+ * 两张图共用顶部的时间维度切换。
+ */
 function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> }): ReactNode {
   const container = useRef<HTMLDivElement>(null)
   const palette = useChartPalette(container)
-  const chart = useMemo(() => buildFundChart(fund), [fund])
-  const categories = useMemo(() => fund.history.map(point => point.date), [fund.history])
-  const options = useMemo<ApexOptions>(() => {
+  const [range, setRange] = useState<FundRangeKey>('all')
+  const chart = useMemo(() => buildFundChart(fund, range), [fund, range])
+  const trendOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
-    const lineColor = chart.rangeReturn >= 0 ? palette.success : palette.error
     return {
       chart: {
         type: 'line',
@@ -651,25 +718,96 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         fontFamily: 'inherit',
         redrawOnParentResize: true,
       },
-      colors: [lineColor],
+      colors: [palette.business],
+      stroke: { curve: 'straight', width: 1.6 },
+      markers: { size: 0, hover: { size: 3 } },
+      dataLabels: { enabled: false },
+      legend: { show: false },
+      grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
+      xaxis: {
+        type: 'datetime',
+        tickAmount: 2,
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        labels: { style: { colors: palette.textMuted, fontSize: '8px' }, datetimeUTC: false },
+      },
+      yaxis: {
+        min: chart.navMin,
+        max: chart.navMax,
+        tickAmount: 3,
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        labels: {
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: value => (value ?? 0).toFixed(3),
+        },
+      },
+      tooltip: {
+        x: { format: 'yyyy-MM-dd' },
+        y: { formatter: value => (value ?? 0).toFixed(4) },
+      },
+      annotations: {
+        points: chart.markers.map(marker => ({
+          x: marker.x,
+          y: marker.y,
+          marker: {
+            size: 3.4,
+            shape: 'circle',
+            fillColor: marker.action === 'buy' ? palette.error : palette.success,
+            strokeColor: palette.surface,
+            strokeWidth: 1,
+          },
+          ...(chart.labels.includes(marker) ? {
+            label: {
+              text: `${marker.date.slice(5)} ${t(marker.action === 'buy' ? 'fund.buyShort' : 'fund.sellShort')}`,
+              offsetY: marker.action === 'buy' ? -6 : 10,
+              borderWidth: 0,
+              style: {
+                background: palette.surface,
+                color: marker.action === 'buy' ? palette.error : palette.success,
+                fontSize: '7px',
+              },
+            },
+          } : {}),
+        })),
+      },
+    }
+  }, [chart, palette, t])
+  const returnOptions = useMemo<ApexOptions>(() => {
+    if (chart === undefined) return {}
+    const baseline = {
+      y: 0,
+      borderColor: chart.costVisible ? palette.textMuted : palette.border,
+      strokeDashArray: chart.costVisible ? 4 : 0,
+    }
+    return {
+      chart: {
+        type: 'line',
+        height: CHART_HEIGHT,
+        toolbar: { show: true, tools: { download: false } },
+        zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
+        animations: { enabled: false },
+        parentHeightOffset: 0,
+        fontFamily: 'inherit',
+        redrawOnParentResize: true,
+      },
+      // 中国习惯：正收益红色，负收益绿色。
+      colors: [palette.error, palette.success],
       stroke: { curve: 'straight', width: 1.8 },
       markers: { size: 0, hover: { size: 3 } },
       dataLabels: { enabled: false },
       legend: { show: false },
       grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
       xaxis: {
-        categories,
+        type: 'datetime',
         tickAmount: 2,
         axisBorder: { show: false },
         axisTicks: { show: false },
-        labels: {
-          style: { colors: palette.textMuted, fontSize: '8px' },
-          formatter: value => String(value).slice(5),
-        },
+        labels: { style: { colors: palette.textMuted, fontSize: '8px' }, datetimeUTC: false },
       },
       yaxis: {
-        min: chart.minValue,
-        max: chart.maxValue,
+        min: chart.returnMin,
+        max: chart.returnMax,
         tickAmount: 3,
         axisBorder: { show: false },
         axisTicks: { show: false },
@@ -679,49 +817,28 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         },
       },
       tooltip: {
-        x: { show: true },
+        x: { format: 'yyyy-MM-dd' },
         y: { formatter: value => `${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)}%` },
       },
       annotations: {
-        yaxis: [
-          { y: 0, borderColor: palette.border, strokeDashArray: 0 },
-          ...(chart.costValue === undefined ? [] : [{
-            y: chart.costValue,
-            borderColor: palette.textMuted,
-            strokeDashArray: 3,
-          }]),
-        ],
-        points: chart.markers.map(marker => ({
-          x: marker.index,
-          y: marker.value,
-          marker: {
-            size: 3,
-            shape: 'circle',
-            fillColor: marker.action === 'buy' ? palette.success : palette.error,
-            strokeColor: palette.surface,
-            strokeWidth: 1,
+        yaxis: [chart.costVisible ? {
+          ...baseline,
+          label: {
+            text: t('fund.costLine'),
+            position: 'left',
+            offsetX: 2,
+            style: { background: 'transparent', color: palette.textMuted, fontSize: '8px' },
           },
-          ...(chart.labels.includes(marker) ? {
-            label: {
-              text: `${marker.date.slice(5)} ${t(marker.action === 'buy' ? 'fund.buyShort' : 'fund.sellShort')}`,
-              offsetY: marker.action === 'buy' ? -5 : 9,
-              borderWidth: 0,
-              style: {
-                background: palette.surface,
-                color: marker.action === 'buy' ? palette.success : palette.error,
-                fontSize: '7px',
-              },
-            },
-          } : {}),
-        })),
+        } : baseline],
       },
     }
-  }, [chart, categories, palette, t])
+  }, [chart, palette, t])
   if (chart === undefined) return <p className={css.emptyBlock}>{t('fund.empty')}</p>
-  const tone = chart.rangeReturn >= 0 ? css.toneSuccess : css.toneError
+  // 中国习惯：正收益红色，负收益绿色。
+  const tone = chart.rangeReturn >= 0 ? css.toneError : css.toneSuccess
   const rangeLabel = t('fund.range', { value: formatPercent(chart.rangeReturn) })
   return (
-    <div className={css.fundFocus}>
+    <div className={css.fundFocus} ref={container}>
       <div className={css.fundFocusHead}>
         <h3>
           {fund.name}
@@ -729,25 +846,48 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         </h3>
         <span className={tone}>{rangeLabel}</span>
       </div>
-      <div className={css.fundApex} ref={container} role="img" aria-label={`${fund.name} ${rangeLabel}`}>
-        <Chart options={options} series={[{ name: fund.name, data: [...chart.points] }]}
-          type="line" height={CHART_HEIGHT} width="100%" />
+      <div className={css.fundRange} role="group" aria-label={t('fund.rangeLabel')}>
+        {FUND_RANGES.map(item => (
+          <button key={item.key} type="button" aria-pressed={range === item.key}
+            className={`${css.fundRangeChip} ${range === item.key ? css.fundRangeChipActive : ''}`}
+            onClick={() => { setRange(item.key) }}>
+            {t(FUND_RANGE_LABEL[item.key])}
+          </button>
+        ))}
+      </div>
+      <div className={css.fundChartBlock}>
+        <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
+        <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.trendTitle')}`}>
+          <Chart options={trendOptions} series={[{ name: t('fund.nav'), data: [...chart.navSeries] }]}
+            type="line" height={CHART_HEIGHT} width="100%" />
+        </div>
+      </div>
+      <div className={css.fundChartBlock}>
+        <span className={css.fundChartTitle}>{t('fund.returnTitle')}</span>
+        <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.returnTitle')}`}>
+          <Chart options={returnOptions}
+            series={[
+              { name: t('fund.positive'), data: [...chart.returnUp] },
+              { name: t('fund.negative'), data: [...chart.returnDown] },
+            ]}
+            type="line" height={CHART_HEIGHT} width="100%" />
+        </div>
       </div>
       <div className={css.fundLegend}>
-        {chart.costY !== undefined && (
-          <span>
+        <span className={css.toneError}>
+          <span className={`${css.swatch} ${css.toneError}`} aria-hidden="true" />
+          {t('fund.buy')}
+        </span>
+        <span className={css.toneSuccess}>
+          <span className={`${css.swatch} ${css.toneSuccess}`} aria-hidden="true" />
+          {t('fund.sell')}
+        </span>
+        {chart.costVisible && (
+          <span className={css.toneMuted}>
             <span className={`${css.swatch} ${css.toneMuted}`} aria-hidden="true" />
             {t('fund.costLine')}
           </span>
         )}
-        <span className={css.toneSuccess}>
-          <span className={`${css.swatch} ${css.toneSuccess}`} aria-hidden="true" />
-          {t('fund.buy')}
-        </span>
-        <span className={css.toneError}>
-          <span className={`${css.swatch} ${css.toneError}`} aria-hidden="true" />
-          {t('fund.sell')}
-        </span>
       </div>
     </div>
   )
@@ -922,13 +1062,13 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
               </div>
               <div className={css.fundStat}>
                 <span>{t('fund.pnl')}</span>
-                <strong className={fundSummary.pnl >= 0 ? css.toneSuccess : css.toneError}>
+                <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
                   {signedMoney(fundSummary.pnl, t)}
                 </strong>
               </div>
               <div className={css.fundStat}>
                 <span>{t('fund.return')}</span>
-                <strong className={fundSummary.pnl >= 0 ? css.toneSuccess : css.toneError}>
+                <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
                   {fundSummary.rate === undefined ? '—' : formatPercent(fundSummary.rate)}
                 </strong>
               </div>
@@ -960,7 +1100,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
                   </div>
                   <div className={css.fundRowValue}>
                     <strong>{t('fund.money', { value: formatNumber(fund.shares * fund.nav) })}</strong>
-                    <span className={fund.nav >= fund.cost ? css.toneSuccess : css.toneError}>
+                    <span className={fund.nav >= fund.cost ? css.toneError : css.toneSuccess}>
                       {formatPercent(fund.cost > 0 ? fund.nav / fund.cost - 1 : 0)}
                     </span>
                   </div>
