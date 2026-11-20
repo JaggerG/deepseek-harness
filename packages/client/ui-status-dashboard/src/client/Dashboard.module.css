@@ -371,9 +371,28 @@
 }
 
 .fundApex {
+  position: relative;
   width: 100%;
   min-height: 150px;
 }
+
+/* 缩放工具栏改为右下角悬浮，不额外占用图表高度。 */
+.fundApex :global(.apexcharts-toolbar) {
+  top: auto !important;
+  right: 2px !important;
+  bottom: 0 !important;
+  z-index: 3;
+}
+
+.fundApex :global(.apexcharts-toolbar svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.fundApex :global(.apexcharts-toolbar > div) {
+  padding: 0 2px;
+}
+
 
 .fundLegend {
   display: flex;
