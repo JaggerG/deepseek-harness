@@ -1,7 +1,8 @@
 .page {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  align-content: start;
   flex: 1 1 auto;
-  flex-direction: column;
   gap: 12px;
   box-sizing: border-box;
   width: 100%;
@@ -21,6 +22,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.header {
+  grid-column: 1 / -1;
+}
+
+.page > section,
+.split > section {
+  grid-column: span 4;
+  min-width: 0;
 }
 
 .header h1,
@@ -71,9 +82,7 @@
 }
 
 .metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  display: contents;
 }
 
 .metric,
@@ -94,14 +103,7 @@
 }
 
 .split {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-
-.split > * {
-  min-width: 0;
+  display: contents;
 }
 
 .metric > span {
