@@ -855,22 +855,24 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           </button>
         ))}
       </div>
-      <div className={css.fundChartBlock}>
-        <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
-        <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.trendTitle')}`}>
-          <Chart options={trendOptions} series={[{ name: t('fund.nav'), data: [...chart.navSeries] }]}
-            type="line" height={CHART_HEIGHT} width="100%" />
+      <div className={css.fundCharts}>
+        <div className={css.fundChartBlock}>
+          <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
+          <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.trendTitle')}`}>
+            <Chart options={trendOptions} series={[{ name: t('fund.nav'), data: [...chart.navSeries] }]}
+              type="line" height={CHART_HEIGHT} width="100%" />
+          </div>
         </div>
-      </div>
-      <div className={css.fundChartBlock}>
-        <span className={css.fundChartTitle}>{t('fund.returnTitle')}</span>
-        <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.returnTitle')}`}>
-          <Chart options={returnOptions}
-            series={[
-              { name: t('fund.positive'), data: [...chart.returnUp] },
-              { name: t('fund.negative'), data: [...chart.returnDown] },
-            ]}
-            type="line" height={CHART_HEIGHT} width="100%" />
+        <div className={css.fundChartBlock}>
+          <span className={css.fundChartTitle}>{t('fund.returnTitle')}</span>
+          <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.returnTitle')}`}>
+            <Chart options={returnOptions}
+              series={[
+                { name: t('fund.positive'), data: [...chart.returnUp] },
+                { name: t('fund.negative'), data: [...chart.returnDown] },
+              ]}
+              type="line" height={CHART_HEIGHT} width="100%" />
+          </div>
         </div>
       </div>
       <div className={css.fundLegend}>
