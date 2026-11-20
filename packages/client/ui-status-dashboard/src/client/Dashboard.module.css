@@ -100,6 +100,10 @@
   align-items: start;
 }
 
+.split > * {
+  min-width: 0;
+}
+
 .metric > span {
   overflow: hidden;
   color: var(--dsw-alias-label-tertiary);
