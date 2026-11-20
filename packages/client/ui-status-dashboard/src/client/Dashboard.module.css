@@ -636,6 +636,45 @@
   background: var(--dsw-alias-state-business-primary);
 }
 
+/* 手机（竖屏）窄宽度：整页改单列，指标卡 2×2，两张基金图上下排。 */
+@media (width < 760px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metric {
+    padding: 10px 12px;
+    aspect-ratio: auto;
+  }
+
+  .metric strong {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .page > section,
+  .split > section {
+    grid-column: 1 / -1;
+  }
+
+  .fundCharts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dailyList {
+    max-height: none;
+  }
+}
+
 @media (width < 620px) {
   .charts {
     grid-template-columns: minmax(0, 1fr);
@@ -644,7 +683,7 @@
 
 @media (width < 430px) {
   .page {
-    padding: 12px;
+    padding: 10px;
   }
 
   .chart {
