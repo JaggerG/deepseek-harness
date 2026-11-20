@@ -1027,7 +1027,6 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
           </ul>
         )}
       </section>
-      </div>
 
       <section className={css.card}>
         <div className={css.sectionHeader}>
@@ -1048,6 +1047,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
           </>
         )}
       </section>
+      </div>
 
       <section className={css.card}>
         <div className={css.sectionHeader}>
