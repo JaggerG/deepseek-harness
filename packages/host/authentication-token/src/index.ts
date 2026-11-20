@@ -32,12 +32,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const auth = await BrowserAuth.create(ctx[Context.root], ctx.credentials, config.cookieMaxAgeDays)
   const peer = ctx.connection.createPeer({ principal: { kind: 'owner' } })
   const apiPeers = new Map<PeerScope['id'], PeerScope>()
+  // 定制（fork）：去掉 token 认证——所有连接直接以 owner 身份放行。
   ctx.connection.authentication.register({
-    authenticate(request) {
-      const secure = ctx.get('webServer')?.protocol === 'https:'
-      if (auth.isAuthenticated(request, secure)) return peer
-      const id = auth.authenticateApi(request, secure)
-      return id === undefined ? undefined : apiPeers.get(id)
+    authenticate(_request) {
+      return peer
     },
   })
   ctx.inject(['webServer'], (webCtx) => {
@@ -48,17 +46,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       apiPeers.clear()
       await Promise.all([...sockets.values()].map(release => release()))
     }, 'host-authentication-token: API sockets')
-    webCtx.on('webserver/request', async (request, response, next) => {
-      const facts: ConnectionTrustRequest = request
-      if (facts.socket?.destroyed || response.destroyed || facts.signal?.aborted) return
-      if (!active) { await next(); return }
-      const url = new URL(request.url ?? '/', 'http://dsh.invalid')
-      if (url.pathname !== '/' || !url.searchParams.has('token')) {
-        await next()
-        return
-      }
-      auth.authorizeIndex(request, response, webCtx.webServer.protocol === 'https:')
-    })
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: CONNECT_PATH, auth: 'anonymous',
       handler(request, response) {
@@ -151,6 +138,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     })
   })
   ctx.on('webserver/entry-url', (baseUrl, entries) => {
-    entries.push({ label: 'dsh web', url: auth.authenticatedUrl(baseUrl), open: true })
+    // 定制（fork）：地址不再携带 token。
+    entries.push({ label: 'dsh web', url: baseUrl, open: true })
   })
 }
