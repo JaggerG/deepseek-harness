@@ -43,6 +43,8 @@ export type DashboardProps =
 const NO_JOBS: readonly JobView[] = []
 const DAILY_AUDIT_PATH = 'scripts/scheduled-reports/logs/daily_audit/state.json'
 const FUND_PANEL_PATH = 'scripts/fund_panel.json'
+/** host_metrics.py 每分钟刷新的主机指标快照（Pi 上由 cron 生成）。 */
+const HOST_METRICS_PATH = 'scripts/scheduled-reports/logs/host_metrics.json'
 const CHART_HEIGHT = 150
 const MAX_DEPTH = 4
 const MAX_DIRECTORIES = 60
@@ -198,6 +200,24 @@ interface FundSnapshot {
 type FundState =
   | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
   | { readonly status: 'ready'; readonly snapshot: FundSnapshot }
+
+interface HostMemory {
+  readonly usedBytes: number
+  readonly totalBytes: number
+  readonly percent: number
+}
+
+interface HostMetrics {
+  readonly asOf: string
+  readonly host: string
+  readonly cpu: number
+  readonly memory: HostMemory
+  readonly temperature: number | null
+}
+
+type HostState =
+  | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
+  | { readonly status: 'ready'; readonly metrics: HostMetrics }
 
 type FundRangeKey = '1m' | '3m' | '6m' | '1y' | 'all'
 
@@ -432,6 +452,48 @@ async function loadFundState(
   }
   try {
     return { status: 'ready', snapshot: parseFundSnapshot(new TextDecoder().decode(result.value.data)) }
+  } catch {
+    return { status: 'invalid' }
+  }
+}
+
+/** Validate the host snapshot written by scripts/host_metrics.py. */
+function parseHostMetrics(text: string): HostMetrics {
+  const root: unknown = JSON.parse(text)
+  if (!isRecord(root) || typeof root.as_of !== 'string' || typeof root.host !== 'string'
+    || typeof root.cpu_percent !== 'number' || !isRecord(root.memory)) {
+    throw new Error('Invalid host metrics')
+  }
+  const memory = root.memory
+  if (typeof memory.used_bytes !== 'number' || typeof memory.total_bytes !== 'number'
+    || typeof memory.percent !== 'number') {
+    throw new Error('Invalid host memory')
+  }
+  return {
+    asOf: root.as_of,
+    host: root.host,
+    cpu: root.cpu_percent,
+    memory: {
+      usedBytes: memory.used_bytes,
+      totalBytes: memory.total_bytes,
+      percent: memory.percent,
+    },
+    temperature: typeof root.temperature_c === 'number' ? root.temperature_c : null,
+  }
+}
+
+async function loadHostState(
+  sessionId: SessionId,
+  readFile: ClientRemote['workspaceFiles']['readBytes'],
+  signal: AbortSignal,
+): Promise<HostState> {
+  const result = await readFile(sessionId, HOST_METRICS_PATH, {}, signal)
+  if (!result.ok) {
+    if (result.error.code === 'workspace-file/not-found') return { status: 'missing' }
+    throw new Error(result.error.message)
+  }
+  try {
+    return { status: 'ready', metrics: parseHostMetrics(new TextDecoder().decode(result.value.data)) }
   } catch {
     return { status: 'invalid' }
   }
@@ -905,6 +967,27 @@ function Metric({ label, value, tone }: { label: string; value: number | string;
   )
 }
 
+/** 主机指标小卡：数值 + 使用率进度条。 */
+function HostStat({ label, value, detail, percent, tone }: {
+  label: string
+  value: string
+  detail?: string | undefined
+  percent: number
+  tone: string
+}): ReactNode {
+  const width = Math.max(0, Math.min(100, percent))
+  return (
+    <div className={css.hostStat}>
+      <span>{label}</span>
+      <strong className={tone}>{value}</strong>
+      <div className={css.hostBar} role="presentation">
+        <div className={`${css.hostBarFill} ${tone}`} style={{ width: `${width}%` }} />
+      </div>
+      {detail !== undefined && <span className={css.hostDetail}>{detail}</span>}
+    </div>
+  )
+}
+
 /** Workspace, Session, scheduled-task, and background-job status page. */
 export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDirectory, readFile, t }: DashboardProps): ReactNode {
   const sessions = useSessions(state => state.ids)
@@ -915,6 +998,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
   const [fileState, setFileState] = useState<FileState>({ status: 'loading' })
   const [dailyState, setDailyState] = useState<DailyState>({ status: 'loading' })
   const [fundState, setFundState] = useState<FundState>({ status: 'loading' })
+  const [hostState, setHostState] = useState<HostState>({ status: 'loading' })
   const [selectedFund, setSelectedFund] = useState('')
 
   useEffect(() => watchRows(sessionId), [sessionId, watchRows])
@@ -967,10 +1051,30 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
     }
   }, [sessionId, readFile, reload])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setHostState({ status: 'loading' })
+    void loadHostState(sessionId, readFile, controller.signal).then(next => {
+      if (active) setHostState(next)
+    }).catch(() => {
+      if (active && !controller.signal.aborted) setHostState({ status: 'error' })
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [sessionId, readFile, reload])
+
   const runningSessions = sessions.filter(id => sessionRows[id]?.running).length
   const runningJobs = jobs.filter(job => job.status === 'running' || job.status === 'stopping').length
   const visibleJobs = useMemo(() => orderedJobs(jobs).slice(0, 6), [jobs])
   const stats = fileState.status === 'ready' ? fileState.stats : undefined
+  const host = hostState.status === 'ready' ? hostState.metrics : undefined
+  const hostTone = (percent: number): string => (
+    percent >= 85 ? (css.toneError ?? '') : percent >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')
+  )
+  const temperature = host?.temperature ?? undefined
   const fileSegments: ChartSegment[] = stats === undefined ? [] : FILE_CATEGORIES.flatMap((category, index) => {
     const value = stats.categories[category]
     if (value === 0) return []
@@ -1115,6 +1219,44 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
               <p className={css.footnote}>{t('fund.source', { source: fundSnapshot.source })}</p>
             )}
           </>
+        )}
+      </section>
+
+      <section className={css.card} data-host-metrics>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('host.title')}</h2>
+            <p>{t('host.subtitle', { time: host?.asOf ?? '—' })}</p>
+          </div>
+          {host !== undefined && <span className={css.count}>{host.host}</span>}
+        </div>
+        {hostState.status === 'loading' && <p className={css.emptyBlock}>{t('host.loading')}</p>}
+        {(hostState.status === 'missing' || hostState.status === 'error' || hostState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(hostState.status === 'missing' ? 'host.missing'
+              : hostState.status === 'invalid' ? 'host.invalid' : 'host.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('host.retry')}
+            </button>
+          </div>
+        )}
+        {host !== undefined && (
+          <div className={css.hostGrid}>
+            <HostStat label={t('host.cpu')} value={`${host.cpu.toFixed(0)}%`}
+              percent={host.cpu} tone={hostTone(host.cpu)} />
+            <HostStat label={t('host.memory')} value={`${host.memory.percent.toFixed(0)}%`}
+              detail={t('host.memoryUsage', {
+                used: (host.memory.usedBytes / 1024 ** 3).toFixed(1),
+                total: (host.memory.totalBytes / 1024 ** 3).toFixed(1),
+              })}
+              percent={host.memory.percent} tone={hostTone(host.memory.percent)} />
+            <HostStat label={t('host.temperature')}
+              value={temperature === undefined ? '—' : `${temperature.toFixed(1)}°C`}
+              percent={temperature === undefined ? 0 : ((temperature - 30) / 60) * 100}
+              tone={temperature === undefined ? (css.toneMuted ?? '')
+                : temperature >= 80 ? (css.toneError ?? '')
+                  : temperature >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')} />
+          </div>
         )}
       </section>
 

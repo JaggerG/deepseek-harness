@@ -430,6 +430,57 @@
   font-size: 11px;
 }
 
+.hostGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hostStat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.hostStat > span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.hostStat strong {
+  overflow: hidden;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hostBar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.hostBarFill {
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  transition: width 0.3s ease;
+}
+
+.hostDetail {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .fundLegend {
   display: flex;
   flex-wrap: wrap;
@@ -666,6 +717,15 @@
 @media (width < 430px) {
   .page {
     padding: 10px;
+  }
+
+  .hostStat {
+    padding: 9px 10px;
+  }
+
+  .hostStat strong {
+    font-size: 18px;
+    line-height: 22px;
   }
 
   .chart {
