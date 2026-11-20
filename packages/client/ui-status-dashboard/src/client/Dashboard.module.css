@@ -670,6 +670,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* 手机端不显示缩放工具栏，避免遮挡图表内容。 */
+  .fundApex :global(.apexcharts-toolbar) {
+    display: none;
+  }
+
   .dailyList {
     max-height: none;
   }
