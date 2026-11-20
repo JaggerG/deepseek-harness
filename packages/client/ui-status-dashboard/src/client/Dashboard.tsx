@@ -711,7 +711,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       chart: {
         type: 'line',
         height: CHART_HEIGHT,
-        toolbar: { show: true, tools: { download: false } },
+        toolbar: { show: false },
         zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
         animations: { enabled: false },
         parentHeightOffset: 0,
@@ -784,7 +784,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       chart: {
         type: 'line',
         height: CHART_HEIGHT,
-        toolbar: { show: true, tools: { download: false } },
+        toolbar: { show: false },
         zoom: { enabled: true, type: 'x', allowMouseWheelZoom: true },
         animations: { enabled: false },
         parentHeightOffset: 0,

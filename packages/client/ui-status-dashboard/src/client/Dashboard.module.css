@@ -430,24 +430,6 @@
   font-size: 11px;
 }
 
-/* 缩放工具栏改为右下角悬浮，不额外占用图表高度。 */
-.fundApex :global(.apexcharts-toolbar) {
-  top: auto !important;
-  right: 2px !important;
-  bottom: 0 !important;
-  z-index: 3;
-}
-
-.fundApex :global(.apexcharts-toolbar svg) {
-  width: 14px;
-  height: 14px;
-}
-
-.fundApex :global(.apexcharts-toolbar > div) {
-  padding: 0 2px;
-}
-
-
 .fundLegend {
   display: flex;
   flex-wrap: wrap;
@@ -668,11 +650,6 @@
 
   .fundCharts {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* 手机端不显示缩放工具栏，避免遮挡图表内容。 */
-  .fundApex :global(.apexcharts-toolbar) {
-    display: none;
   }
 
   .dailyList {
