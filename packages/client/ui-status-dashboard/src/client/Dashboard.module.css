@@ -28,6 +28,11 @@
   grid-column: 1 / -1;
 }
 
+/* 主机状态置顶，占满整行。 */
+.page > .hostCard {
+  grid-column: 1 / -1;
+}
+
 .page > section,
 .split > section {
   grid-column: span 4;
@@ -81,52 +86,15 @@
   }
 }
 
-.metrics {
-  display: contents;
-}
-
-.metric,
 .card {
+  padding: 14px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-bg-layer-1);
 }
 
-.metric {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  min-width: 0;
-  aspect-ratio: 1;
-  padding: 12px 14px;
-}
-
 .split {
   display: contents;
-}
-
-.metric > span {
-  overflow: hidden;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric strong {
-  font-size: 24px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 30px;
-}
-
-.valueBusiness {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.card {
-  padding: 14px;
 }
 
 .sectionHeader {
@@ -669,29 +637,13 @@
   background: var(--dsw-alias-state-business-primary);
 }
 
-/* 手机（竖屏）窄宽度：整页改单列，指标卡 2×2，两张基金图上下排。 */
+/* 手机（竖屏）窄宽度：整页改单列，两张基金图上下排。 */
 @media (width < 760px) {
   .page {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
     padding: 12px;
     font-size: 14px;
-  }
-
-  .metrics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .metric {
-    padding: 10px 12px;
-    aspect-ratio: auto;
-  }
-
-  .metric strong {
-    font-size: 20px;
-    line-height: 26px;
   }
 
   .page > section,

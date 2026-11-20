@@ -957,16 +957,6 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
   )
 }
 
-/** One headline metric. */
-function Metric({ label, value, tone }: { label: string; value: number | string; tone?: string | undefined }): ReactNode {
-  return (
-    <div className={css.metric}>
-      <span>{label}</span>
-      <strong className={tone}>{value}</strong>
-    </div>
-  )
-}
-
 /** 主机指标小卡：数值 + 使用率进度条。 */
 function HostStat({ label, value, detail, percent, tone }: {
   label: string
@@ -1122,12 +1112,43 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
         </button>
       </header>
 
-      <div className={css.metrics}>
-        <Metric label={t('metric.sessions')} value={sessions.length} />
-        <Metric label={t('metric.runningSessions')} value={runningSessions} tone={css.valueBusiness} />
-        <Metric label={t('metric.files')} value={stats?.files ?? '—'} />
-        <Metric label={t('metric.runningJobs')} value={runningJobs} tone={runningJobs > 0 ? css.valueBusiness : undefined} />
-      </div>
+      <section className={`${css.card} ${css.hostCard}`} data-host-metrics>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('host.title')}</h2>
+            <p>{t('host.subtitle', { time: host?.asOf ?? '—' })}</p>
+          </div>
+          {host !== undefined && <span className={css.count}>{host.host}</span>}
+        </div>
+        {hostState.status === 'loading' && <p className={css.emptyBlock}>{t('host.loading')}</p>}
+        {(hostState.status === 'missing' || hostState.status === 'error' || hostState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(hostState.status === 'missing' ? 'host.missing'
+              : hostState.status === 'invalid' ? 'host.invalid' : 'host.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('host.retry')}
+            </button>
+          </div>
+        )}
+        {host !== undefined && (
+          <div className={css.hostGrid}>
+            <HostStat label={t('host.cpu')} value={`${host.cpu.toFixed(0)}%`}
+              percent={host.cpu} tone={hostTone(host.cpu)} />
+            <HostStat label={t('host.memory')} value={`${host.memory.percent.toFixed(0)}%`}
+              detail={t('host.memoryUsage', {
+                used: (host.memory.usedBytes / 1024 ** 3).toFixed(1),
+                total: (host.memory.totalBytes / 1024 ** 3).toFixed(1),
+              })}
+              percent={host.memory.percent} tone={hostTone(host.memory.percent)} />
+            <HostStat label={t('host.temperature')}
+              value={temperature === undefined ? '—' : `${temperature.toFixed(1)}°C`}
+              percent={temperature === undefined ? 0 : ((temperature - 30) / 60) * 100}
+              tone={temperature === undefined ? (css.toneMuted ?? '')
+                : temperature >= 80 ? (css.toneError ?? '')
+                  : temperature >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')} />
+          </div>
+        )}
+      </section>
 
       <div className={css.split}>
       <section className={css.card} data-fund-panel>
@@ -1219,44 +1240,6 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
               <p className={css.footnote}>{t('fund.source', { source: fundSnapshot.source })}</p>
             )}
           </>
-        )}
-      </section>
-
-      <section className={css.card} data-host-metrics>
-        <div className={css.sectionHeader}>
-          <div>
-            <h2>{t('host.title')}</h2>
-            <p>{t('host.subtitle', { time: host?.asOf ?? '—' })}</p>
-          </div>
-          {host !== undefined && <span className={css.count}>{host.host}</span>}
-        </div>
-        {hostState.status === 'loading' && <p className={css.emptyBlock}>{t('host.loading')}</p>}
-        {(hostState.status === 'missing' || hostState.status === 'error' || hostState.status === 'invalid') && (
-          <div className={css.emptyBlock}>
-            <p>{t(hostState.status === 'missing' ? 'host.missing'
-              : hostState.status === 'invalid' ? 'host.invalid' : 'host.error')}</p>
-            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
-              {t('host.retry')}
-            </button>
-          </div>
-        )}
-        {host !== undefined && (
-          <div className={css.hostGrid}>
-            <HostStat label={t('host.cpu')} value={`${host.cpu.toFixed(0)}%`}
-              percent={host.cpu} tone={hostTone(host.cpu)} />
-            <HostStat label={t('host.memory')} value={`${host.memory.percent.toFixed(0)}%`}
-              detail={t('host.memoryUsage', {
-                used: (host.memory.usedBytes / 1024 ** 3).toFixed(1),
-                total: (host.memory.totalBytes / 1024 ** 3).toFixed(1),
-              })}
-              percent={host.memory.percent} tone={hostTone(host.memory.percent)} />
-            <HostStat label={t('host.temperature')}
-              value={temperature === undefined ? '—' : `${temperature.toFixed(1)}°C`}
-              percent={temperature === undefined ? 0 : ((temperature - 30) / 60) * 100}
-              tone={temperature === undefined ? (css.toneMuted ?? '')
-                : temperature >= 80 ? (css.toneError ?? '')
-                  : temperature >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')} />
-          </div>
         )}
       </section>
 
