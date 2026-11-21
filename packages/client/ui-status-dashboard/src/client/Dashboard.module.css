@@ -449,6 +449,64 @@
   font-variant-numeric: tabular-nums;
 }
 
+.fundChartHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 桌面端单图较窄，均线开关换到标题下一行，避免挤压相邻图表标题。 */
+@media (width >= 760px) {
+  .fundChartHead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}
+
+/* 均线开关：与区间按钮同风格，但更小。 */
+.fundMaChips {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.fundMaChip {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 7px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .fundMaChip:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.fundMaChipActive {
+  border-color: transparent;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.fundMaDot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
 .fundLegend {
   display: flex;
   flex-wrap: wrap;

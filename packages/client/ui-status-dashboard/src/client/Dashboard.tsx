@@ -588,6 +588,44 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
   }
 }
 
+/** 时间轴刻度文案：短区间显示月/日，长区间显示中文月份。 */
+function formatAxisLabel(value: string, timestamp: number | undefined, spanDays: number): string {
+  const time = timestamp ?? Number(value)
+  if (Number.isNaN(time) || time <= 0) return value
+  const date = new Date(time)
+  const month = date.getMonth() + 1
+  return spanDays <= 60 ? `${month}/${date.getDate()}` : `${month}月`
+}
+
+/** 净值走势图可叠加的均线窗口；配色避开买入红、卖出绿。 */
+const MA_WINDOWS = [10, 60, 120] as const
+type MaWindow = typeof MA_WINDOWS[number]
+const MA_COLORS: Readonly<Record<MaWindow, string>> = {
+  10: '#e8a33d',
+  60: '#d158b8',
+  120: '#8f6de0',
+}
+
+/** 用完整净值历史计算移动平均，再裁剪到当前区间起点之后。 */
+function buildMovingAverages(history: readonly FundNavPoint[], startTs: number): Record<MaWindow, FundPoint[]> {
+  const result: Record<MaWindow, FundPoint[]> = { 10: [], 60: [], 120: [] }
+  for (const window of MA_WINDOWS) {
+    let sum = 0
+    for (let index = 0; index < history.length; index += 1) {
+      const point = history[index]
+      if (point === undefined) continue
+      sum += point.nav
+      const expired = index >= window ? history[index - window] : undefined
+      if (expired !== undefined) sum -= expired.nav
+      if (index < window - 1) continue
+      const timestamp = toTimestamp(point.date)
+      if (timestamp < startTs) continue
+      result[window].push({ x: timestamp, y: sum / window })
+    }
+  }
+  return result
+}
+
 function toTimestamp(date: string): number {
   const value = Date.parse(`${date}T00:00:00`)
   return Number.isNaN(value) ? 0 : value
@@ -781,7 +819,15 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
   const palette = useChartPalette(container)
   const [range, setRange] = useState<FundRangeKey>('all')
   const compact = useCompactViewport()
+  const [maOn, setMaOn] = useState<readonly MaWindow[]>([10, 60])
   const chart = useMemo(() => buildFundChart(fund, range), [fund, range])
+  const maData = useMemo(
+    () => chart === undefined ? undefined : buildMovingAverages(fund.history, toTimestamp(chart.startDate)),
+    [fund.history, chart],
+  )
+  const spanDays = chart === undefined
+    ? 0
+    : (toTimestamp(chart.endDate) - toTimestamp(chart.startDate)) / 86_400_000
   const trendOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
     return {
@@ -795,8 +841,8 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         fontFamily: 'inherit',
         redrawOnParentResize: true,
       },
-      colors: [palette.business],
-      stroke: { curve: 'straight', width: 1.6 },
+      colors: [palette.business, MA_COLORS[10], MA_COLORS[60], MA_COLORS[120]],
+      stroke: { curve: 'straight', width: [1.6, 1, 1, 1] },
       markers: { size: 0, hover: { size: 3 } },
       dataLabels: { enabled: false },
       legend: { show: false },
@@ -804,15 +850,19 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       xaxis: {
         type: 'datetime',
         tickAmount: 2,
-        axisBorder: { show: false },
+        axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
-        labels: { style: { colors: palette.textMuted, fontSize: '8px' }, datetimeUTC: false },
+        labels: {
+          datetimeUTC: false,
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: string, timestamp?: number) => formatAxisLabel(value, timestamp, spanDays),
+        },
       },
       yaxis: {
         min: chart.navMin,
         max: chart.navMax,
         tickAmount: 3,
-        axisBorder: { show: false },
+        axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
@@ -849,7 +899,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         })),
       },
     }
-  }, [chart, palette, t, compact])
+  }, [chart, palette, t, compact, spanDays])
   const returnOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
     const baseline = {
@@ -878,15 +928,19 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       xaxis: {
         type: 'datetime',
         tickAmount: 2,
-        axisBorder: { show: false },
+        axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
-        labels: { style: { colors: palette.textMuted, fontSize: '8px' }, datetimeUTC: false },
+        labels: {
+          datetimeUTC: false,
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: string, timestamp?: number) => formatAxisLabel(value, timestamp, spanDays),
+        },
       },
       yaxis: {
         min: chart.returnMin,
         max: chart.returnMax,
         tickAmount: 3,
-        axisBorder: { show: false },
+        axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
@@ -902,14 +956,17 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           ...baseline,
           label: {
             text: t('fund.costLine'),
-            position: 'left',
-            offsetX: 2,
+            // 放在绘图区右端、去掉底框，避免压在坐标轴刻度上。
+            position: 'right',
+            textAnchor: 'end',
+            offsetX: -4,
+            borderWidth: 0,
             style: { background: 'transparent', color: palette.textMuted, fontSize: '8px' },
           },
         } : baseline],
       },
     }
-  }, [chart, palette, t, compact])
+  }, [chart, palette, t, compact, spanDays])
   if (chart === undefined) return <p className={css.emptyBlock}>{t('fund.empty')}</p>
   // 中国习惯：正收益红色，负收益绿色。
   const tone = chart.rangeReturn >= 0 ? css.toneError : css.toneSuccess
@@ -934,9 +991,36 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       </div>
       <div className={css.fundCharts}>
         <div className={css.fundChartBlock}>
-          <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
+          <div className={css.fundChartHead}>
+            <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
+            <div className={css.fundMaChips} role="group" aria-label={t('fund.maLabel')}>
+              {MA_WINDOWS.map(window => {
+                const on = maOn.includes(window)
+                return (
+                  <button key={window} type="button" aria-pressed={on}
+                    className={`${css.fundMaChip} ${on ? css.fundMaChipActive : ''}`}
+                    onClick={() => {
+                      setMaOn(current => current.includes(window)
+                        ? current.filter(item => item !== window)
+                        : [...current, window])
+                    }}>
+                    <span className={css.fundMaDot} style={{ background: MA_COLORS[window] }} aria-hidden="true" />
+                    {`MA${window}`}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <div className={css.fundApex} role="img" aria-label={`${fund.name} ${t('fund.trendTitle')}`}>
-            <Chart options={trendOptions} series={[{ name: t('fund.nav'), data: [...chart.navSeries] }]}
+            <Chart options={trendOptions}
+              series={[
+                { name: t('fund.nav'), data: [...chart.navSeries] },
+                ...MA_WINDOWS.map(window => ({
+                  name: `MA${window}`,
+                  // 关闭时保留空序列，确保颜色槽位固定。
+                  data: maOn.includes(window) ? [...(maData?.[window] ?? [])] : [],
+                })),
+              ]}
               type="line" height={CHART_HEIGHT} width="100%" />
           </div>
         </div>
