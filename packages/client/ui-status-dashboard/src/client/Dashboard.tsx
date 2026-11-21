@@ -887,11 +887,11 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           x: marker.x,
           y: marker.y,
           marker: {
-            size: 3.4,
+            size: 1.7,
             shape: 'circle',
             fillColor: marker.action === 'buy' ? palette.error : palette.success,
             strokeColor: palette.surface,
-            strokeWidth: 1,
+            strokeWidth: 0.5,
           },
           ...(chart.labels.includes(marker) ? {
             label: {
