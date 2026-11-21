@@ -603,6 +603,16 @@ function formatAxisLabel(value: string, timestamp: number | undefined, spanDays:
   return spanDays <= 60 ? `${month}/${date.getDate()}` : `${month}月`
 }
 
+/** 悬停提示统一显示完整日期，与只到月份的坐标轴刻度区分开。 */
+function formatTooltipDate(value: string | number): string {
+  const time = Number(value)
+  if (Number.isNaN(time) || time <= 0) return String(value)
+  const date = new Date(time)
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
 /** 净值走势图可叠加的均线窗口；配色避开买入红、卖出绿。 */
 const MA_WINDOWS = [10, 60, 120] as const
 type MaWindow = typeof MA_WINDOWS[number]
@@ -851,14 +861,14 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         redrawOnParentResize: true,
       },
       colors: [palette.business, MA_COLORS[10], MA_COLORS[60], MA_COLORS[120]],
-      stroke: { curve: 'straight', width: [1.6, 1, 1, 1] },
+      stroke: { curve: 'straight', width: [1, 1, 1, 1] },
       markers: { size: 0, hover: { size: 3 } },
       dataLabels: { enabled: false },
       legend: { show: false },
       grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
       xaxis: {
         type: 'datetime',
-        tickAmount: 2,
+        tickAmount: 4,
         axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
         labels: {
@@ -871,7 +881,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         min: chart.navMin,
         max: chart.navMax,
         tickAmount: 3,
-        axisBorder: { show: true, color: palette.border },
+        axisBorder: { show: false },
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
@@ -879,7 +889,8 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         },
       },
       tooltip: {
-        x: { format: 'yyyy-MM-dd' },
+        // 悬停标题给完整日期，坐标轴刻度仍按月显示。
+        x: { format: 'yyyy-MM-dd', formatter: (value: string | number) => formatTooltipDate(value) },
         y: { formatter: value => (value ?? 0).toFixed(4) },
       },
       annotations: {
@@ -929,14 +940,14 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
       },
       // 中国习惯：正收益红色，负收益绿色。
       colors: [palette.error, palette.success],
-      stroke: { curve: 'straight', width: 1.8 },
+      stroke: { curve: 'straight', width: 1 },
       markers: { size: 0, hover: { size: 3 } },
       dataLabels: { enabled: false },
       legend: { show: false },
       grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
       xaxis: {
         type: 'datetime',
-        tickAmount: 2,
+        tickAmount: 4,
         axisBorder: { show: true, color: palette.border },
         axisTicks: { show: false },
         labels: {
@@ -949,7 +960,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         min: chart.returnMin,
         max: chart.returnMax,
         tickAmount: 3,
-        axisBorder: { show: true, color: palette.border },
+        axisBorder: { show: false },
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
@@ -957,7 +968,8 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         },
       },
       tooltip: {
-        x: { format: 'yyyy-MM-dd' },
+        // 悬停标题给完整日期，坐标轴刻度仍按月显示。
+        x: { format: 'yyyy-MM-dd', formatter: (value: string | number) => formatTooltipDate(value) },
         y: { formatter: value => `${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)}%` },
       },
       annotations: {
