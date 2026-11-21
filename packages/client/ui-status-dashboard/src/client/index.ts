@@ -71,6 +71,20 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const opened = new Set<SessionId>()
     let timer: ReturnType<typeof setTimeout> | undefined
+    // H5 上状态面板铺满整屏，但会话恢复晚于首帧；先用同色遮罩挡住聊天输入框，
+    // 面板完成挂载后立刻撤掉，避免「先输入框、后面板」的闪烁。
+    let cover: HTMLDivElement | undefined
+    if (typeof document !== 'undefined' && window.innerWidth < 768) {
+      cover = document.createElement('div')
+      cover.dataset.dshDashboardBoot = ''
+      cover.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:var(--dsw-alias-bg-base,#101114)'
+      document.body.append(cover)
+    }
+    const dropCover = (): void => {
+      cover?.remove()
+      cover = undefined
+    }
+    const coverTimer = cover === undefined ? undefined : setTimeout(dropCover, 4_000)
     const reveal = (force: boolean): void => {
       if (timer !== undefined) clearTimeout(timer)
       // `mounted` changes before React mints the arriving Session's surface;
@@ -81,6 +95,8 @@ export function apply(ctx: ClientContext): void {
         if (sessionId === undefined || (!force && opened.has(sessionId))) return
         ctx.sidebarRight.openTab(DASHBOARD_KIND)
         opened.add(sessionId)
+        // 等面板完成这一帧绘制再撤遮罩。
+        requestAnimationFrame(dropCover)
       }, 0)
     }
     const scheduleReveal = (): void => { reveal(false) }
@@ -100,6 +116,8 @@ export function apply(ctx: ClientContext): void {
       unsubscribe()
       unsubscribeFull()
       if (timer !== undefined) clearTimeout(timer)
+      if (coverTimer !== undefined) clearTimeout(coverTimer)
+      dropCover()
     }
   }, 'ui-status-dashboard: reveal for mounted Session')
 }
