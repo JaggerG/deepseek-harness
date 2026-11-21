@@ -259,6 +259,12 @@ interface FundPoint {
   readonly y: number
 }
 
+/** 收益率曲线的拆段点：y 为 null 表示断线，避免跨区间连成直线。 */
+interface ReturnPoint {
+  readonly x: number
+  readonly y: number | null
+}
+
 interface FundMarker {
   /** 净值日期时间戳，正好对齐 datetime 轴。 */
   readonly x: number
@@ -271,8 +277,8 @@ interface FundMarker {
 
 interface FundChartGeometry {
   readonly navSeries: readonly FundPoint[]
-  readonly returnUp: readonly FundPoint[]
-  readonly returnDown: readonly FundPoint[]
+  readonly returnUp: readonly ReturnPoint[]
+  readonly returnDown: readonly ReturnPoint[]
   readonly markers: readonly FundMarker[]
   readonly labels: readonly FundMarker[]
   readonly startDate: string
@@ -643,9 +649,9 @@ function sliceFundHistory(history: readonly FundNavPoint[], range: FundRangeKey)
 }
 
 /** 收益率曲线按零轴拆成涨跌两条序列，用于红涨绿跌着色。 */
-function splitReturnBySign(points: readonly FundPoint[]): { up: FundPoint[]; down: FundPoint[] } {
-  const up: FundPoint[] = []
-  const down: FundPoint[] = []
+function splitReturnBySign(points: readonly FundPoint[]): { up: ReturnPoint[]; down: ReturnPoint[] } {
+  const up: ReturnPoint[] = []
+  const down: ReturnPoint[] = []
   points.forEach((point, index) => {
     const positive = point.y >= 0
     if (positive) up.push(point)
@@ -655,9 +661,12 @@ function splitReturnBySign(points: readonly FundPoint[]): { up: FundPoint[]; dow
     // 在零轴插入交点，保证红绿两段在视觉上连续。
     const span = point.y - next.y
     const fraction = span === 0 ? 0 : point.y / span
-    const crossing = { x: point.x + (next.x - point.x) * fraction, y: 0 }
+    const crossing: ReturnPoint = { x: point.x + (next.x - point.x) * fraction, y: 0 }
     up.push(crossing)
     down.push(crossing)
+    // 离开当前符号的一侧立刻断线，否则会沿零轴拖出一条直线。
+    if (positive) up.push({ x: crossing.x, y: null })
+    else down.push({ x: crossing.x, y: null })
   })
   return { up, down }
 }
@@ -1079,8 +1088,6 @@ function HostStat({ label, value, detail, percent, tone }: {
 
 /** Workspace, Session, scheduled-task, and background-job status page. */
 export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDirectory, readFile, t }: DashboardProps): ReactNode {
-  const sessions = useSessions(state => state.ids)
-  const sessionRows = useSessions(state => state.byId)
   const cwd = useSessions(state => selectSessionDirectory(state, sessionId))
   const jobs = useJobs(state => state.rows[sessionId]) ?? NO_JOBS
   const [reload, setReload] = useState(0)
@@ -1155,8 +1162,6 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
     }
   }, [sessionId, readFile, reload])
 
-  const runningSessions = sessions.filter(id => sessionRows[id]?.running).length
-  const runningJobs = jobs.filter(job => job.status === 'running' || job.status === 'stopping').length
   const visibleJobs = useMemo(() => orderedJobs(jobs).slice(0, 6), [jobs])
   const stats = fileState.status === 'ready' ? fileState.stats : undefined
   const host = hostState.status === 'ready' ? hostState.metrics : undefined
@@ -1170,18 +1175,6 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
     const tones: readonly Tone[] = ['toneBusiness', 'toneSuccess', 'toneWarning', 'toneError', 'toneMuted', 'toneBusiness']
     return [{ key: category, label: t(`category.${category}`), value, tone: tones[index] ?? 'toneMuted' }]
   })
-  const sessionSegments: ChartSegment[] = [
-    { key: 'running', label: t('session.running'), value: runningSessions, tone: 'toneBusiness' },
-    { key: 'idle', label: t('session.idle'), value: sessions.length - runningSessions, tone: 'toneMuted' },
-  ]
-  const completedJobs = jobs.filter(job => job.status === 'completed' && (job.exitCode === undefined || job.exitCode === 0)).length
-  const failedJobs = jobs.filter(job => job.status === 'failed' || (job.status === 'completed' && job.exitCode !== undefined && job.exitCode !== 0)).length
-  const jobSegments: ChartSegment[] = [
-    { key: 'running', label: t('status.running'), value: runningJobs, tone: 'toneBusiness' },
-    { key: 'completed', label: t('status.completed'), value: completedJobs, tone: 'toneSuccess' },
-    { key: 'failed', label: t('status.failed'), value: failedJobs, tone: 'toneError' },
-    { key: 'killed', label: t('status.killed'), value: jobs.filter(job => job.status === 'killed').length, tone: 'toneMuted' },
-  ]
   const dailySubtitle = dailyState.status === 'ready' && dailyState.date !== undefined
     ? t(dailyState.historical ? 'daily.historical' : 'daily.date', { date: dailyState.date })
     : t('daily.subtitle')
@@ -1414,16 +1407,6 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
         )}
       </section>
       </div>
-
-      <section className={css.card}>
-        <div className={css.sectionHeader}>
-          <div><h2>{t('activity.title')}</h2><p>{t('activity.subtitle')}</p></div>
-        </div>
-        <div className={css.charts}>
-          <DonutChart title={t('chart.sessions')} segments={sessionSegments} totalLabel={t('chart.total')} emptyLabel={t('chart.empty')} />
-          <DonutChart title={t('chart.jobs')} segments={jobSegments} totalLabel={t('chart.total')} emptyLabel={t('chart.empty')} />
-        </div>
-      </section>
     </div>
   )
 }

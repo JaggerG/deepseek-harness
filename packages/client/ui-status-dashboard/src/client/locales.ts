@@ -100,14 +100,8 @@ export const zh = {
   'category.data': '数据',
   'category.code': '代码',
   'category.other': '其他',
-  'activity.title': '会话与任务',
-  'activity.subtitle': '实时状态分布',
-  'chart.sessions': '会话状态',
-  'chart.jobs': '任务状态',
   'chart.total': '总计',
   'chart.empty': '暂无数据',
-  'session.running': '运行中',
-  'session.idle': '空闲',
 } as const
 
 /** English dictionary. */
@@ -209,14 +203,8 @@ export const en: Record<StatusDashboardKey, string> = {
   'category.data': 'Data',
   'category.code': 'Code',
   'category.other': 'Other',
-  'activity.title': 'Sessions and jobs',
-  'activity.subtitle': 'Live status distribution',
-  'chart.sessions': 'Session status',
-  'chart.jobs': 'Job status',
   'chart.total': 'Total',
   'chart.empty': 'No data',
-  'session.running': 'Running',
-  'session.idle': 'Idle',
 }
 
 /** Dictionary key domain. */
