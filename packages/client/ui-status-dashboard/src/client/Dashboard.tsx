@@ -289,6 +289,8 @@ interface FundChartGeometry {
   readonly returnMin: number
   readonly returnMax: number
   readonly costVisible: boolean
+  /** 在持基金的成本净值；非在持为 undefined，两张图共用。 */
+  readonly costNav: number | undefined
 }
 
 function emptyCategories(): Record<FileCategory, number> {
@@ -570,6 +572,7 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
     labels.push(candidate)
   }
   const navValues = [...navSeries.map(point => point.y), ...markers.map(marker => marker.y)]
+  if (costNav !== undefined) navValues.push(costNav)
   const navLow = Math.min(...navValues)
   const navHigh = Math.max(...navValues)
   const navSpan = navHigh - navLow || navHigh * 0.01 || 0.01
@@ -591,6 +594,7 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
     returnMin: Math.min(returnLow - returnSpan * 0.1, -0.5),
     returnMax: Math.max(returnHigh + returnSpan * 0.1, 0.5),
     costVisible: costNav !== undefined,
+    costNav,
   }
 }
 
@@ -894,6 +898,20 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         y: { formatter: value => (value ?? 0).toFixed(4) },
       },
       annotations: {
+        // 净值图上的成本线：与收益率图的 0% 基准是同一条成本净值。
+        yaxis: chart.costNav === undefined ? [] : [{
+          y: chart.costNav,
+          borderColor: palette.textMuted,
+          strokeDashArray: 4,
+          label: {
+            text: t('fund.costLine'),
+            position: 'right',
+            textAnchor: 'end',
+            offsetX: -4,
+            borderWidth: 0,
+            style: { background: 'transparent', color: palette.textMuted, fontSize: '8px' },
+          },
+        }],
         points: chart.markers.map(marker => ({
           x: marker.x,
           y: marker.y,
