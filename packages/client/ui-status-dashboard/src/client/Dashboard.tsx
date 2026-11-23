@@ -1468,78 +1468,6 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
         )}
       </section>
 
-      <section className={`${css.card} ${css.quantCard}`} data-quant-panel>
-        <div className={css.sectionHeader}>
-          <div>
-            <h2>{t('quant.title')}</h2>
-            <p>{t('quant.subtitle', {
-              date: quantSnapshot !== undefined && quantSnapshot.asOf !== '' ? quantSnapshot.asOf : '—',
-            })}</p>
-          </div>
-          {quantSnapshot !== undefined && (
-            <span className={css.count}>
-              {t('quant.openCount', { count: quantSnapshot.gates.filter(gate => gate.open).length })}
-            </span>
-          )}
-        </div>
-        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('quant.loading')}</p>}
-        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
-          <div className={css.emptyBlock}>
-            <p>{t(quantState.status === 'missing' ? 'quant.missing'
-              : quantState.status === 'invalid' ? 'quant.invalid' : 'quant.error')}</p>
-            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
-              {t('quant.retry')}
-            </button>
-          </div>
-        )}
-        {quantSnapshot !== undefined && (
-          <>
-            <div className={css.quantGrid}>
-              {quantSnapshot.gates.map(gate => <GateCard key={gate.kind} gate={gate} t={t} />)}
-            </div>
-            <p className={css.footnote}>{t('quant.note')}</p>
-            {quantSnapshot.source !== '' && (
-              <p className={css.footnote}>{t('quant.source', { source: quantSnapshot.source })}</p>
-            )}
-          </>
-        )}
-      </section>
-
-      <section className={`${css.card} ${css.simCard}`} data-sim-panel>
-        <div className={css.sectionHeader}>
-          <div>
-            <h2>{t('sim.title')}</h2>
-            <p>{t('sim.subtitle', { date: simAsOf !== '' ? simAsOf : (quantSnapshot?.asOf ?? '') || '—' })}</p>
-          </div>
-          {sims.length > 0 && <span className={css.count}>{t('sim.count', { count: sims.length })}</span>}
-        </div>
-        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('sim.loading')}</p>}
-        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
-          <div className={css.emptyBlock}>
-            <p>{t(quantState.status === 'missing' ? 'sim.missing'
-              : quantState.status === 'invalid' ? 'sim.invalid' : 'sim.error')}</p>
-            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
-              {t('sim.retry')}
-            </button>
-          </div>
-        )}
-        {quantSnapshot !== undefined && sims.length === 0 && (
-          <p className={css.emptyBlock}>{t('sim.empty')}</p>
-        )}
-        {quantSnapshot !== undefined && sims.length > 0 && (
-          <>
-            {simHasSeries && <SimCompare sims={sims} t={t} />}
-            <div className={css.simGrid}>
-              {sims.map(sim => <SimCard key={sim.kind} sim={sim} t={t} />)}
-            </div>
-            <p className={css.footnote}>{t('sim.note')}</p>
-            {quantSnapshot.simSource !== '' && (
-              <p className={css.footnote}>{t('sim.source', { source: quantSnapshot.simSource })}</p>
-            )}
-          </>
-        )}
-      </section>
-
       <div className={css.split}>
         <section className={css.card} data-fund-panel>
           <div className={css.sectionHeader}>
@@ -1633,6 +1561,78 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
           )}
         </section>
       </div>
+
+      <section className={`${css.card} ${css.quantCard}`} data-quant-panel>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('quant.title')}</h2>
+            <p>{t('quant.subtitle', {
+              date: quantSnapshot !== undefined && quantSnapshot.asOf !== '' ? quantSnapshot.asOf : '—',
+            })}</p>
+          </div>
+          {quantSnapshot !== undefined && (
+            <span className={css.count}>
+              {t('quant.openCount', { count: quantSnapshot.gates.filter(gate => gate.open).length })}
+            </span>
+          )}
+        </div>
+        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('quant.loading')}</p>}
+        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(quantState.status === 'missing' ? 'quant.missing'
+              : quantState.status === 'invalid' ? 'quant.invalid' : 'quant.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('quant.retry')}
+            </button>
+          </div>
+        )}
+        {quantSnapshot !== undefined && (
+          <>
+            <div className={css.quantGrid}>
+              {quantSnapshot.gates.map(gate => <GateCard key={gate.kind} gate={gate} t={t} />)}
+            </div>
+            <p className={css.footnote}>{t('quant.note')}</p>
+            {quantSnapshot.source !== '' && (
+              <p className={css.footnote}>{t('quant.source', { source: quantSnapshot.source })}</p>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className={`${css.card} ${css.simCard}`} data-sim-panel>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('sim.title')}</h2>
+            <p>{t('sim.subtitle', { date: simAsOf !== '' ? simAsOf : (quantSnapshot?.asOf ?? '') || '—' })}</p>
+          </div>
+          {sims.length > 0 && <span className={css.count}>{t('sim.count', { count: sims.length })}</span>}
+        </div>
+        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('sim.loading')}</p>}
+        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(quantState.status === 'missing' ? 'sim.missing'
+              : quantState.status === 'invalid' ? 'sim.invalid' : 'sim.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('sim.retry')}
+            </button>
+          </div>
+        )}
+        {quantSnapshot !== undefined && sims.length === 0 && (
+          <p className={css.emptyBlock}>{t('sim.empty')}</p>
+        )}
+        {quantSnapshot !== undefined && sims.length > 0 && (
+          <>
+            {simHasSeries && <SimCompare sims={sims} t={t} />}
+            <div className={css.simGrid}>
+              {sims.map(sim => <SimCard key={sim.kind} sim={sim} t={t} />)}
+            </div>
+            <p className={css.footnote}>{t('sim.note')}</p>
+            {quantSnapshot.simSource !== '' && (
+              <p className={css.footnote}>{t('sim.source', { source: quantSnapshot.simSource })}</p>
+            )}
+          </>
+        )}
+      </section>
     </div>
   )
 }
