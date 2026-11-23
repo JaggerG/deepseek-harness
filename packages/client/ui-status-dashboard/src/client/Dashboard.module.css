@@ -449,6 +449,321 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 量化闸门占满整行，两道闸门左右并排。 */
+.page > .quantCard {
+  grid-column: 1 / -1;
+}
+
+.quantGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quantGate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.quantGateHead {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.quantGateHead h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quantMeta {
+  margin: 2px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.quantBadge {
+  flex: none;
+  padding: 1px 8px;
+  border: 0.5px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.quantBadgeOpen {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.quantBadgeClosed {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.quantStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.quantStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quantStat span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.quantStat strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quantHint {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.quantApex {
+  position: relative;
+  width: 100%;
+  min-height: 120px;
+}
+
+.quantFoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+/* 模拟盘占满整行：净值对比整幅，账户卡左右并排。 */
+.page > .simCard {
+  grid-column: 1 / -1;
+}
+
+.simChart {
+  margin-bottom: 10px;
+}
+
+.simChartHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.simChartTitle {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.simLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.simLegend > span {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.simDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.simApex {
+  position: relative;
+  width: 100%;
+  min-height: 160px;
+}
+
+.simGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.simBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.simHead {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.simHeadText {
+  min-width: 0;
+}
+
+.simHead h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.simHeadText p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.simStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.simStat span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.simStat strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simSection {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.simSection h4 {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.simList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.simRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.simRow + .simRow {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.simNameCol {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.simName {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simCode {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.simMeta {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simVal {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.simChip {
+  flex: none;
+  padding: 0 5px;
+  border: 0.5px solid currentColor;
+  border-radius: var(--dsw-radius-xs);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+/* 买红卖绿，与涨幅配色一致。 */
+.simChipBuy {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.simChipSell {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.simEmpty {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
 .fundChartHead {
   display: flex;
   flex-wrap: wrap;
@@ -710,6 +1025,24 @@
 
   .fundCharts {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quantGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quantApex {
+    aspect-ratio: 16 / 9;
+    min-height: 0;
+  }
+
+  .simGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .simApex {
+    aspect-ratio: 16 / 9;
+    min-height: 0;
   }
 
   /* H5 上图表按 4:3 长宽比铺满卡片宽度，高度随宽度走。 */

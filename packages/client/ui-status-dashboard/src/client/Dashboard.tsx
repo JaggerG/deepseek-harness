@@ -7,9 +7,7 @@ import type { ReactNode, RefObject } from 'react'
 import Chart from 'react-apexcharts'
 import type { ApexOptions } from 'apexcharts'
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
-import type { JobsSnapshot, JobView } from '@deepseek-ai/dsh-api-job-controller/client'
-import { selectSessionDirectory } from '@deepseek-ai/dsh-api-session-controller/client/directories'
-import { IconRefreshOutlineRegular, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconRefreshOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   InjectFace, PropsLocale, PropsRuntime, TranslateNS,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -19,18 +17,7 @@ import css from './Dashboard.module.css'
 
 /** Registration-side services and observable sources for the dashboard. */
 export interface DashboardInjected {
-  hooks: {
-    /** Client jobs snapshot, bound by the renderer as useJobs. */
-    jobs: {
-      getSnapshot(): JobsSnapshot
-      subscribe(listener: () => void): () => void
-    }
-  }
-  /** Keep the current Session's job roster current while this page is mounted. */
-  watchRows(sessionId: SessionId): () => void
-  /** Bounded workspace directory listing; paths are absolute or workspace-relative. */
-  listDirectory: ClientRemote['workspaceFiles']['list']
-  /** Complete-file bytes used by the daily-audit JSON snapshot. */
+  /** Complete-file bytes used by the fund panel and host metrics snapshots. */
   readFile: ClientRemote['workspaceFiles']['readBytes']
 }
 
@@ -40,22 +27,12 @@ export type DashboardProps =
   & PropsLocale<typeof NS>
   & InjectFace<DashboardInjected>
 
-const NO_JOBS: readonly JobView[] = []
-const DAILY_AUDIT_PATH = 'scripts/scheduled-reports/logs/daily_audit/state.json'
 const FUND_PANEL_PATH = 'scripts/fund_panel.json'
 /** host_metrics.py 每分钟刷新的主机指标快照（Pi 上由 cron 生成）。 */
 const HOST_METRICS_PATH = 'scripts/scheduled-reports/logs/host_metrics.json'
+/** 量化闸门快照：scripts/export_quant_panel.py 由指数日线计算并落盘。 */
+const QUANT_PANEL_PATH = 'scripts/quant_panel.json'
 const CHART_HEIGHT = 150
-const MAX_DEPTH = 4
-const MAX_DIRECTORIES = 60
-const MAX_FILES = 2_000
-const SKIPPED_DIRECTORIES = new Set([
-  '.git', '.next', '.turbo', '.cache', 'node_modules', 'dist', 'lib', 'build', 'coverage',
-])
-
-const FILE_CATEGORIES = ['notes', 'documents', 'images', 'data', 'code', 'other'] as const
-type FileCategory = typeof FILE_CATEGORIES[number]
-type Tone = 'toneBusiness' | 'toneSuccess' | 'toneWarning' | 'toneError' | 'toneMuted'
 
 /** Theme tokens ApexCharts needs as concrete colors (it cannot resolve CSS variables). */
 const CHART_TOKENS = {
@@ -105,7 +82,7 @@ function useChartPalette(ref: RefObject<HTMLElement>): ChartPalette {
       attributes: true,
       attributeFilter: ['class', 'style', 'data-theme'],
     })
-    return () => observer.disconnect()
+    return () => { observer.disconnect() }
   }, [ref])
   return palette
 }
@@ -119,67 +96,10 @@ function useCompactViewport(): boolean {
     const listener = (): void => { setCompact(media.matches) }
     listener()
     media.addEventListener('change', listener)
-    return () => media.removeEventListener('change', listener)
+    return () => { media.removeEventListener('change', listener) }
   }, [])
   return compact
 }
-
-function toneColor(tone: Tone, palette: ChartPalette): string {
-  switch (tone) {
-    case 'toneBusiness': return palette.business
-    case 'toneSuccess': return palette.success
-    case 'toneWarning': return palette.warning
-    case 'toneError': return palette.error
-    default: return palette.muted
-  }
-}
-
-interface ChartSegment {
-  readonly key: string
-  readonly label: string
-  readonly value: number
-  readonly tone: Tone
-}
-
-interface FileStats {
-  readonly files: number
-  readonly directories: number
-  readonly categories: Readonly<Record<FileCategory, number>>
-  readonly truncated: boolean
-}
-
-type FileState =
-  | { readonly status: 'loading' | 'error' }
-  | { readonly status: 'ready'; readonly stats: FileStats }
-
-interface DailyTaskDefinition {
-  readonly name: string
-  readonly group: string
-  readonly schedule: string
-}
-
-interface DailyTaskResult {
-  readonly status: string
-  readonly detail: string
-}
-
-interface DailyTaskView extends DailyTaskDefinition {
-  readonly result: DailyTaskResult | undefined
-}
-
-interface DailyAuditSnapshot {
-  readonly tasks: readonly DailyTaskDefinition[]
-  readonly results: Readonly<Record<string, Readonly<Record<string, DailyTaskResult>>>>
-}
-
-type DailyState =
-  | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
-  | {
-    readonly status: 'ready'
-    readonly tasks: readonly DailyTaskView[]
-    readonly date: string | undefined
-    readonly historical: boolean
-  }
 
 interface FundTrade {
   readonly date: string
@@ -232,6 +152,98 @@ interface HostMetrics {
 type HostState =
   | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
   | { readonly status: 'ready'; readonly metrics: HostMetrics }
+
+interface GatePoint {
+  readonly date: string
+  readonly close: number
+  readonly ma: number
+}
+
+interface GateProjection {
+  readonly days: number
+  readonly needPct: number
+}
+
+/** 单道牛熊闸门：指数收盘 vs 长期均线，关闭时策略强制空仓。 */
+interface GateRecord {
+  readonly kind: string
+  readonly title: string
+  readonly idxName: string
+  readonly strat: string
+  readonly date: string
+  readonly maN: number
+  readonly close: number
+  readonly ma: number
+  readonly devPct: number
+  readonly open: boolean
+  readonly needPct: number
+  readonly slope: number
+  readonly series: readonly GatePoint[]
+  readonly projection: readonly GateProjection[]
+}
+
+interface SimPosition {
+  readonly code: string
+  readonly name: string
+  readonly shares: number
+  readonly avgCost: number
+  readonly costValue: number
+  readonly weightPct: number
+}
+
+interface SimSignal {
+  readonly code: string
+  readonly name: string
+  readonly side: 'buy' | 'sell'
+  readonly value: number
+  readonly note: string
+}
+
+interface SimTrade {
+  readonly date: string
+  readonly code: string
+  readonly name: string
+  readonly side: 'buy' | 'sell'
+  readonly shares: number
+  readonly price: number
+}
+
+interface SimPoint {
+  readonly date: string
+  readonly equity: number
+  readonly nav: number
+}
+
+/** 单套模拟盘：账户快照 + 净值曲线 + 持仓 / 次日信号 / 最近成交。 */
+interface SimRecord {
+  readonly kind: string
+  readonly title: string
+  readonly strat: string
+  readonly simStart: string
+  readonly asOf: string
+  readonly startCash: number
+  readonly equity: number
+  readonly cash: number
+  readonly returnPct: number
+  readonly maxDrawdownPct: number
+  readonly cashPct: number
+  readonly positions: readonly SimPosition[]
+  readonly signals: readonly SimSignal[]
+  readonly trades: readonly SimTrade[]
+  readonly series: readonly SimPoint[]
+}
+
+interface QuantSnapshot {
+  readonly asOf: string
+  readonly source: string
+  readonly simSource: string
+  readonly gates: readonly GateRecord[]
+  readonly sims: readonly SimRecord[]
+}
+
+type QuantState =
+  | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
+  | { readonly status: 'ready'; readonly snapshot: QuantSnapshot }
 
 type FundRangeKey = '1m' | '3m' | '6m' | '1y' | 'all'
 
@@ -293,123 +305,8 @@ interface FundChartGeometry {
   readonly costNav: number | undefined
 }
 
-function emptyCategories(): Record<FileCategory, number> {
-  return { notes: 0, documents: 0, images: 0, data: 0, code: 0, other: 0 }
-}
-
-function categoryOf(name: string): FileCategory {
-  const dot = name.lastIndexOf('.')
-  const extension = dot < 0 ? '' : name.slice(dot + 1).toLowerCase()
-  if (['md', 'mdx', 'markdown', 'txt'].includes(extension)) return 'notes'
-  if (['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv'].includes(extension)) return 'documents'
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(extension)) return 'images'
-  if (['json', 'jsonl', 'yaml', 'yml', 'toml', 'xml'].includes(extension)) return 'data'
-  if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'css', 'html', 'java', 'go', 'rs'].includes(extension)) return 'code'
-  return 'other'
-}
-
-/** Walk a bounded workspace snapshot without following dependency or build trees. */
-async function scanWorkspace(
-  sessionId: SessionId,
-  cwd: string,
-  listDirectory: ClientRemote['workspaceFiles']['list'],
-  signal: AbortSignal,
-): Promise<FileStats> {
-  const categories = emptyCategories()
-  const queue: { path: string; depth: number }[] = [{ path: cwd, depth: 0 }]
-  let files = 0
-  let directories = 0
-  let truncated = false
-  while (queue.length > 0 && directories < MAX_DIRECTORIES && files < MAX_FILES) {
-    const current = queue.shift()
-    if (current === undefined) break
-    const result = await listDirectory(sessionId, current.path, signal)
-    if (!result.ok) throw new Error(result.error.message)
-    directories += 1
-    truncated ||= result.value.truncated
-    for (const entry of result.value.entries) {
-      const path = result.value.path === '' ? entry.name : `${result.value.path}/${entry.name}`
-      if (entry.type === 'directory') {
-        if (current.depth < MAX_DEPTH && !SKIPPED_DIRECTORIES.has(entry.name)) {
-          queue.push({ path, depth: current.depth + 1 })
-        }
-        continue
-      }
-      if (entry.type !== 'file') continue
-      categories[categoryOf(entry.name)] += 1
-      files += 1
-      if (files >= MAX_FILES) {
-        truncated = true
-        break
-      }
-    }
-  }
-  truncated ||= queue.length > 0
-  return { files, directories, categories, truncated }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Validate the audit file at the workspace boundary before using its rows. */
-function parseDailyAudit(text: string): DailyAuditSnapshot {
-  const root: unknown = JSON.parse(text)
-  if (!isRecord(root) || !Array.isArray(root.tasks) || !isRecord(root.results)) {
-    throw new Error('Invalid daily-audit root')
-  }
-  const tasks = root.tasks.map(raw => {
-    if (!isRecord(raw) || typeof raw.name !== 'string'
-      || typeof raw.group !== 'string' || typeof raw.schedule !== 'string') {
-      throw new Error('Invalid daily-task definition')
-    }
-    return { name: raw.name, group: raw.group, schedule: raw.schedule }
-  })
-  const results: Record<string, Record<string, DailyTaskResult>> = {}
-  for (const [date, rawDay] of Object.entries(root.results)) {
-    if (!isRecord(rawDay)) throw new Error('Invalid daily-audit date')
-    const day: Record<string, DailyTaskResult> = {}
-    for (const [name, rawResult] of Object.entries(rawDay)) {
-      if (!isRecord(rawResult) || typeof rawResult.status !== 'string'
-        || (rawResult.detail !== undefined && typeof rawResult.detail !== 'string')) {
-        throw new Error('Invalid daily-task result')
-      }
-      day[name] = { status: rawResult.status, detail: rawResult.detail ?? '' }
-    }
-    results[date] = day
-  }
-  return { tasks, results }
-}
-
-function presentDailyAudit(snapshot: DailyAuditSnapshot): DailyState {
-  const now = new Date()
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const dates = Object.keys(snapshot.results).sort()
-  const date = dates.includes(today) ? today : dates[dates.length - 1]
-  const dayResults = date === undefined ? undefined : snapshot.results[date]
-  return {
-    status: 'ready',
-    date,
-    historical: date !== undefined && date !== today,
-    tasks: snapshot.tasks.map(task => ({ ...task, result: dayResults?.[task.name] })),
-  }
-}
-
-async function loadDailyState(
-  sessionId: SessionId,
-  readFile: ClientRemote['workspaceFiles']['readBytes'],
-  signal: AbortSignal,
-): Promise<DailyState> {
-  const result = await readFile(sessionId, DAILY_AUDIT_PATH, {}, signal)
-  if (!result.ok) {
-    if (result.error.code === 'workspace-file/not-found') return { status: 'missing' }
-    throw new Error(result.error.message)
-  }
-  try {
-    return presentDailyAudit(parseDailyAudit(new TextDecoder().decode(result.value.data)))
-  } catch {
-    return { status: 'invalid' }
-  }
 }
 
 /** Validate the exported fund panel at the workspace boundary. */
@@ -418,7 +315,7 @@ function parseFundSnapshot(text: string): FundSnapshot {
   if (!isRecord(root) || !Array.isArray(root.funds)) {
     throw new Error('Invalid fund-panel root')
   }
-  const funds = root.funds.map(raw => {
+  const funds = root.funds.map((raw) => {
     if (!isRecord(raw) || typeof raw.code !== 'string' || typeof raw.name !== 'string'
       || typeof raw.holding !== 'boolean' || typeof raw.shares !== 'number'
       || typeof raw.cost !== 'number' || typeof raw.nav !== 'number'
@@ -426,7 +323,7 @@ function parseFundSnapshot(text: string): FundSnapshot {
       || !Array.isArray(raw.trades) || !Array.isArray(raw.history)) {
       throw new Error('Invalid fund row')
     }
-    const trades = raw.trades.map(rawTrade => {
+    const trades = raw.trades.map((rawTrade) => {
       if (!isRecord(rawTrade) || typeof rawTrade.date !== 'string'
         || (rawTrade.action !== 'buy' && rawTrade.action !== 'sell')
         || typeof rawTrade.amount !== 'number') {
@@ -435,7 +332,7 @@ function parseFundSnapshot(text: string): FundSnapshot {
       const action: 'buy' | 'sell' = rawTrade.action === 'buy' ? 'buy' : 'sell'
       return { date: rawTrade.date, action, amount: rawTrade.amount }
     })
-    const history = raw.history.map(rawPoint => {
+    const history = raw.history.map((rawPoint) => {
       if (!isRecord(rawPoint) || typeof rawPoint.date !== 'string'
         || typeof rawPoint.nav !== 'number' || rawPoint.nav <= 0) {
         throw new Error('Invalid fund nav point')
@@ -516,6 +413,155 @@ async function loadHostState(
   }
   try {
     return { status: 'ready', metrics: parseHostMetrics(new TextDecoder().decode(result.value.data)) }
+  } catch {
+    return { status: 'invalid' }
+  }
+}
+
+/** Validate the quant gate snapshot exported by scripts/export_quant_panel.py. */
+function parseQuantSnapshot(text: string): QuantSnapshot {
+  const root: unknown = JSON.parse(text)
+  if (!isRecord(root) || !Array.isArray(root.gates)) throw new Error('Invalid quant-panel root')
+  const gates = root.gates.map((raw) => {
+    if (!isRecord(raw) || typeof raw.kind !== 'string' || typeof raw.title !== 'string'
+      || typeof raw.idx_name !== 'string' || typeof raw.strat !== 'string'
+      || typeof raw.date !== 'string' || typeof raw.ma_n !== 'number'
+      || typeof raw.close !== 'number' || typeof raw.ma !== 'number'
+      || typeof raw.dev_pct !== 'number' || typeof raw.open !== 'boolean'
+      || typeof raw.need_pct !== 'number' || typeof raw.ma_slope_20d !== 'number'
+      || !Array.isArray(raw.series) || !Array.isArray(raw.projection)) {
+      throw new Error('Invalid quant gate')
+    }
+    const series = raw.series.map((rawPoint) => {
+      if (!isRecord(rawPoint) || typeof rawPoint.date !== 'string'
+        || typeof rawPoint.close !== 'number' || typeof rawPoint.ma !== 'number') {
+        throw new Error('Invalid gate point')
+      }
+      return { date: rawPoint.date, close: rawPoint.close, ma: rawPoint.ma }
+    })
+    const projection = raw.projection.map((rawItem) => {
+      if (!isRecord(rawItem) || typeof rawItem.days !== 'number'
+        || typeof rawItem.need_pct !== 'number') {
+        throw new Error('Invalid gate projection')
+      }
+      return { days: rawItem.days, needPct: rawItem.need_pct }
+    })
+    return {
+      kind: raw.kind,
+      title: raw.title,
+      idxName: raw.idx_name,
+      strat: raw.strat,
+      date: raw.date,
+      maN: raw.ma_n,
+      close: raw.close,
+      ma: raw.ma,
+      devPct: raw.dev_pct,
+      open: raw.open,
+      needPct: raw.need_pct,
+      slope: raw.ma_slope_20d,
+      series,
+      projection,
+    }
+  })
+  const sims = Array.isArray(root.sims) ? root.sims.map(parseSimRecord) : []
+  return {
+    asOf: typeof root.as_of === 'string' ? root.as_of : '',
+    source: typeof root.source === 'string' ? root.source : '',
+    simSource: typeof root.sim_source === 'string' ? root.sim_source : '',
+    gates,
+    sims,
+  }
+}
+
+/** Validate one simulated account exported alongside the gates. */
+function parseSimRecord(raw: unknown): SimRecord {
+  if (!isRecord(raw) || typeof raw.kind !== 'string' || typeof raw.title !== 'string'
+    || typeof raw.strat !== 'string' || typeof raw.sim_start !== 'string'
+    || typeof raw.as_of !== 'string' || typeof raw.start_cash !== 'number'
+    || typeof raw.equity !== 'number' || typeof raw.cash !== 'number'
+    || typeof raw.return_pct !== 'number' || typeof raw.max_drawdown_pct !== 'number'
+    || typeof raw.cash_pct !== 'number' || !Array.isArray(raw.positions)
+    || !Array.isArray(raw.signals) || !Array.isArray(raw.trades) || !Array.isArray(raw.series)) {
+    throw new Error('Invalid sim record')
+  }
+  const positions = raw.positions.map((rawPos) => {
+    if (!isRecord(rawPos) || typeof rawPos.code !== 'string' || typeof rawPos.name !== 'string'
+      || typeof rawPos.shares !== 'number' || typeof rawPos.avg_cost !== 'number'
+      || typeof rawPos.cost_value !== 'number' || typeof rawPos.weight_pct !== 'number') {
+      throw new Error('Invalid sim position')
+    }
+    return {
+      code: rawPos.code,
+      name: rawPos.name,
+      shares: rawPos.shares,
+      avgCost: rawPos.avg_cost,
+      costValue: rawPos.cost_value,
+      weightPct: rawPos.weight_pct,
+    }
+  })
+  const signals = raw.signals.map((rawSignal) => {
+    if (!isRecord(rawSignal) || typeof rawSignal.code !== 'string'
+      || typeof rawSignal.name !== 'string'
+      || (rawSignal.side !== 'buy' && rawSignal.side !== 'sell')
+      || typeof rawSignal.value !== 'number' || typeof rawSignal.note !== 'string') {
+      throw new Error('Invalid sim signal')
+    }
+    const side: 'buy' | 'sell' = rawSignal.side === 'buy' ? 'buy' : 'sell'
+    return {
+      code: rawSignal.code, name: rawSignal.name, side, value: rawSignal.value, note: rawSignal.note,
+    }
+  })
+  const trades = raw.trades.map((rawTrade) => {
+    if (!isRecord(rawTrade) || typeof rawTrade.date !== 'string'
+      || typeof rawTrade.code !== 'string' || typeof rawTrade.name !== 'string'
+      || (rawTrade.side !== 'buy' && rawTrade.side !== 'sell')
+      || typeof rawTrade.shares !== 'number' || typeof rawTrade.price !== 'number') {
+      throw new Error('Invalid sim trade')
+    }
+    const side: 'buy' | 'sell' = rawTrade.side === 'buy' ? 'buy' : 'sell'
+    return {
+      date: rawTrade.date, code: rawTrade.code, name: rawTrade.name,
+      side, shares: rawTrade.shares, price: rawTrade.price,
+    }
+  })
+  const series = raw.series.map((rawPoint) => {
+    if (!isRecord(rawPoint) || typeof rawPoint.date !== 'string'
+      || typeof rawPoint.equity !== 'number' || typeof rawPoint.nav !== 'number') {
+      throw new Error('Invalid sim point')
+    }
+    return { date: rawPoint.date, equity: rawPoint.equity, nav: rawPoint.nav }
+  })
+  return {
+    kind: raw.kind,
+    title: raw.title,
+    strat: raw.strat,
+    simStart: raw.sim_start,
+    asOf: raw.as_of,
+    startCash: raw.start_cash,
+    equity: raw.equity,
+    cash: raw.cash,
+    returnPct: raw.return_pct,
+    maxDrawdownPct: raw.max_drawdown_pct,
+    cashPct: raw.cash_pct,
+    positions,
+    signals,
+    trades,
+    series,
+  }
+}
+
+async function loadQuantState(
+  sessionId: SessionId,
+  readFile: ClientRemote['workspaceFiles']['readBytes'],
+  signal: AbortSignal,
+): Promise<QuantState> {
+  const result = await readFile(sessionId, QUANT_PANEL_PATH, {}, signal)
+  if (!result.ok) {
+    if (result.error.code === 'workspace-file/not-found') return { status: 'missing' }
+    throw new Error(result.error.message)
+  }
+  try {
+    return { status: 'ready', snapshot: parseQuantSnapshot(new TextDecoder().decode(result.value.data)) }
   } catch {
     return { status: 'invalid' }
   }
@@ -697,142 +743,6 @@ function signedMoney(value: number, t: TranslateNS<typeof NS>): string {
   return `${value >= 0 ? '+' : '-'}${t('fund.money', { value: formatNumber(Math.abs(value)) })}`
 }
 
-function dailyDotState(result: DailyTaskResult | undefined): StateDotState {
-  switch (result?.status) {
-    case 'ok':
-    case 'backfilled': return 'done'
-    case 'running': return 'ongoing'
-    case 'missing':
-    case 'failed':
-    case 'no_artifact':
-    case 'missed': return 'error'
-    case 'pending': return 'warning'
-    case 'idle':
-    case 'skip':
-    case 'skip_day':
-    case undefined: return 'idle'
-    default: return 'warning'
-  }
-}
-
-function dailyStatusLabel(result: DailyTaskResult | undefined, t: TranslateNS<typeof NS>): string {
-  switch (result?.status) {
-    case 'ok': return t('daily.status.ok')
-    case 'backfilled': return t('daily.status.backfilled')
-    case 'running': return t('daily.status.running')
-    case 'missing': return t('daily.status.missing')
-    case 'failed': return t('daily.status.failed')
-    case 'no_artifact': return t('daily.status.noArtifact')
-    case 'missed': return t('daily.status.missed')
-    case 'pending': return t('daily.status.pending')
-    case 'idle': return t('daily.status.idle')
-    case 'skip': return t('daily.status.skip')
-    case 'skip_day': return t('daily.status.skipDay')
-    case undefined: return t('daily.status.unavailable')
-    default: return result?.status ?? t('daily.status.unavailable')
-  }
-}
-
-function statusLabel(status: JobView['status'], t: TranslateNS<typeof NS>): string {
-  switch (status) {
-    case 'running': return t('status.running')
-    case 'stopping': return t('status.stopping')
-    case 'completed': return t('status.completed')
-    case 'killed': return t('status.killed')
-    case 'failed': return t('status.failed')
-  }
-}
-
-function jobDotState(job: JobView): StateDotState {
-  switch (job.status) {
-    case 'running': return 'ongoing'
-    case 'stopping': return 'warning'
-    case 'completed': return job.exitCode === undefined || job.exitCode === 0 ? 'done' : 'warning'
-    case 'killed': return 'warning'
-    case 'failed': return 'error'
-  }
-}
-
-function orderedJobs(jobs: readonly JobView[]): JobView[] {
-  return [...jobs].sort((left, right) => {
-    const leftLive = left.status === 'running' || left.status === 'stopping'
-    const rightLive = right.status === 'running' || right.status === 'stopping'
-    if (leftLive !== rightLive) return leftLive ? -1 : 1
-    return right.startedAt - left.startedAt
-  })
-}
-
-/** One accessible SVG donut with a semantic-token legend. */
-function DonutChart({ title, segments, totalLabel, emptyLabel }: {
-  title: string
-  segments: readonly ChartSegment[]
-  totalLabel: string
-  emptyLabel: string
-}): ReactNode {
-  const container = useRef<HTMLDivElement>(null)
-  const palette = useChartPalette(container)
-  const total = segments.reduce((sum, segment) => sum + segment.value, 0)
-  const empty = total === 0
-  const options = useMemo<ApexOptions>(() => ({
-    chart: {
-      type: 'donut',
-      height: 112,
-      width: 112,
-      animations: { enabled: false },
-      parentHeightOffset: 0,
-      fontFamily: 'inherit',
-    },
-    series: empty ? [1] : segments.map(segment => segment.value),
-    labels: empty ? [emptyLabel] : segments.map(segment => segment.label),
-    colors: empty ? [palette.border] : segments.map(segment => toneColor(segment.tone, palette)),
-    stroke: { width: 2, colors: [palette.surface] },
-    dataLabels: { enabled: false },
-    legend: { show: false },
-    tooltip: { enabled: !empty, y: { formatter: value => String(value) } },
-    plotOptions: {
-      pie: {
-        expandOnClick: false,
-        donut: {
-          size: '76%',
-          labels: {
-            show: true,
-            name: { show: false },
-            value: { show: false },
-            total: {
-              show: true,
-              label: empty ? emptyLabel : totalLabel,
-              color: palette.text,
-              fontSize: '20px',
-              formatter: () => String(empty ? 0 : total),
-            },
-          },
-        },
-      },
-    },
-  }), [segments, empty, emptyLabel, total, totalLabel, palette])
-  return (
-    <div className={css.chart}>
-      <div className={css.donutApex} ref={container} role="img" aria-label={title}>
-        <Chart options={options} series={options.series} type="donut" height={112} width={112} />
-      </div>
-      <div className={css.chartCopy}>
-        <h3>{title}</h3>
-        {total === 0 ? <p className={css.empty}>{emptyLabel}</p> : (
-          <ul className={css.legend}>
-            {segments.map(segment => (
-              <li key={segment.key}>
-                <span className={`${css.swatch} ${css[segment.tone]}`} aria-hidden="true" />
-                <span>{segment.label}</span>
-                <strong>{segment.value}</strong>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /**
  * 单只基金两张图：上图为净值走势与买卖点，下图为相对成本的收益率（红涨绿跌）。
  * 两张图共用顶部的时间维度切换。
@@ -889,7 +799,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
-          formatter: value => (value ?? 0).toFixed(3),
+          formatter: (value: number) => value.toFixed(3),
         },
       },
       tooltip: {
@@ -982,7 +892,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         axisTicks: { show: false },
         labels: {
           style: { colors: palette.textMuted, fontSize: '8px' },
-          formatter: value => `${(value ?? 0).toFixed(0)}%`,
+          formatter: (value: number) => `${value.toFixed(0)}%`,
         },
       },
       tooltip: {
@@ -1033,7 +943,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           <div className={css.fundChartHead}>
             <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
             <div className={css.fundMaChips} role="group" aria-label={t('fund.maLabel')}>
-              {MA_WINDOWS.map(window => {
+              {MA_WINDOWS.map((window) => {
                 const on = maOn.includes(window)
                 return (
                   <button key={window} type="button" aria-pressed={on}
@@ -1095,6 +1005,322 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
   )
 }
 
+/** 闸门卡：指数收盘 vs 长期均线，附一段近一年走势与开闸推演。 */
+function GateCard({ gate, t }: { gate: GateRecord; t: TranslateNS<typeof NS> }): ReactNode {
+  const container = useRef<HTMLDivElement>(null)
+  const palette = useChartPalette(container)
+  const compact = useCompactViewport()
+  const first = gate.series[0]
+  const last = gate.series[gate.series.length - 1]
+  const spanDays = first === undefined || last === undefined
+    ? 0
+    : (toTimestamp(last.date) - toTimestamp(first.date)) / DAY_MS
+  const options = useMemo<ApexOptions>(() => {
+    const values = gate.series.flatMap(point => [point.close, point.ma])
+    const low = values.length > 0 ? Math.min(...values) : 0
+    const high = values.length > 0 ? Math.max(...values) : 1
+    const span = high - low || high * 0.01 || 1
+    return {
+      chart: {
+        type: 'line',
+        height: 120,
+        toolbar: { show: false },
+        zoom: { enabled: false },
+        animations: { enabled: false },
+        parentHeightOffset: 0,
+        fontFamily: 'inherit',
+        redrawOnParentResize: true,
+      },
+      colors: [palette.business, palette.muted],
+      stroke: { curve: 'straight', width: [1.2, 1], dashArray: [0, 4] },
+      markers: { size: 0, hover: { size: 3 } },
+      dataLabels: { enabled: false },
+      legend: { show: false },
+      grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
+      xaxis: {
+        type: 'datetime',
+        tickAmount: 4,
+        axisBorder: { show: true, color: palette.border },
+        axisTicks: { show: false },
+        labels: {
+          datetimeUTC: false,
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: string, timestamp?: number) => formatAxisLabel(value, timestamp, spanDays),
+        },
+      },
+      yaxis: {
+        min: low - span * 0.08,
+        max: high + span * 0.08,
+        tickAmount: 3,
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        labels: {
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: number) => value.toFixed(0),
+        },
+      },
+      tooltip: {
+        x: { format: 'yyyy-MM-dd', formatter: (value: string | number) => formatTooltipDate(value) },
+        y: { formatter: value => (value ?? 0).toFixed(2) },
+      },
+    }
+  }, [gate, palette, spanDays])
+  const devTone = gate.devPct >= 0 ? css.toneError : css.toneSuccess
+  const projection = gate.projection
+    .map(item => t('quant.projItem', { days: item.days, value: signedNumber(item.needPct) }))
+    .join(' · ')
+  return (
+    <div className={css.quantGate} ref={container} data-quant-gate={gate.kind}>
+      <div className={css.quantGateHead}>
+        <div>
+          <h3>{gate.title}</h3>
+          <p className={css.quantMeta}>
+            {t('quant.gateMeta', { strat: gate.strat, index: gate.idxName, n: gate.maN })}
+          </p>
+        </div>
+        <span className={`${css.quantBadge} ${gate.open ? css.quantBadgeOpen : css.quantBadgeClosed}`}>
+          {t(gate.open ? 'quant.open' : 'quant.closed')}
+        </span>
+      </div>
+      <div className={css.quantStats}>
+        <div className={css.quantStat}>
+          <span>{t('quant.close')}</span>
+          <strong>{gate.close.toFixed(2)}</strong>
+        </div>
+        <div className={css.quantStat}>
+          <span>{t('quant.maLine', { n: gate.maN })}</span>
+          <strong>{gate.ma.toFixed(2)}</strong>
+        </div>
+        <div className={css.quantStat}>
+          <span>{t('quant.dev')}</span>
+          <strong className={devTone}>{signedPercent(gate.devPct)}</strong>
+        </div>
+      </div>
+      <p className={css.quantHint}>
+        {gate.open ? t('quant.openHint') : t('quant.needHint', { value: signedNumber(gate.needPct) })}
+      </p>
+      <div className={css.quantApex} role="img" aria-label={`${gate.title} ${t('quant.trendTitle')}`}>
+        <Chart options={options}
+          series={[
+            { name: gate.idxName, data: gate.series.map(point => ({ x: toTimestamp(point.date), y: point.close })) },
+            { name: t('quant.maLineShort', { n: gate.maN }), data: gate.series.map(point => ({ x: toTimestamp(point.date), y: point.ma })) },
+          ]}
+          type="line" height={compact ? '100%' : 120} width="100%" />
+      </div>
+      <div className={css.quantFoot}>
+        <span>{t('quant.slope', { n: gate.maN, value: signedNumber(gate.slope) })}</span>
+        {!gate.open && <span>{t('quant.projection', { values: projection })}</span>}
+      </div>
+    </div>
+  )
+}
+
+/** 两套模拟盘的归一化净值对比（各自以起点本金为 1.000）。 */
+function SimCompare({ sims, t }: { sims: readonly SimRecord[]; t: TranslateNS<typeof NS> }): ReactNode {
+  const container = useRef<HTMLDivElement>(null)
+  const palette = useChartPalette(container)
+  const compact = useCompactViewport()
+  const colorAt = (index: number): string => (index % 2 === 0 ? palette.business : palette.warning)
+  const options = useMemo<ApexOptions>(() => {
+    const stamps = sims.flatMap(sim => sim.series.map(point => toTimestamp(point.date)))
+    const navs = sims.flatMap(sim => sim.series.map(point => point.nav))
+    const spanDays = stamps.length > 0
+      ? (Math.max(...stamps) - Math.min(...stamps)) / DAY_MS
+      : 0
+    const low = navs.length > 0 ? Math.min(...navs) : 0.99
+    const high = navs.length > 0 ? Math.max(...navs) : 1.01
+    const span = high - low || high * 0.005 || 0.01
+    return {
+      chart: {
+        type: 'line',
+        height: 160,
+        toolbar: { show: false },
+        zoom: { enabled: false },
+        animations: { enabled: false },
+        parentHeightOffset: 0,
+        fontFamily: 'inherit',
+        redrawOnParentResize: true,
+      },
+      colors: sims.map((_, index) => (index % 2 === 0 ? palette.business : palette.warning)),
+      stroke: { curve: 'straight', width: 1.4 },
+      markers: { size: 0, hover: { size: 3 } },
+      dataLabels: { enabled: false },
+      legend: { show: false },
+      grid: { show: false, padding: { left: 2, right: 2, top: 6, bottom: 0 } },
+      xaxis: {
+        type: 'datetime',
+        tickAmount: 3,
+        axisBorder: { show: true, color: palette.border },
+        axisTicks: { show: false },
+        labels: {
+          datetimeUTC: false,
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: string, timestamp?: number) => formatAxisLabel(value, timestamp, spanDays),
+        },
+      },
+      yaxis: {
+        min: low - span * 0.15,
+        max: high + span * 0.15,
+        tickAmount: 3,
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        labels: {
+          style: { colors: palette.textMuted, fontSize: '8px' },
+          formatter: (value: number) => value.toFixed(3),
+        },
+      },
+      tooltip: {
+        x: { format: 'yyyy-MM-dd', formatter: (value: string | number) => formatTooltipDate(value) },
+        y: { formatter: value => (value ?? 0).toFixed(3) },
+      },
+    }
+  }, [sims, palette])
+  return (
+    <div className={css.simChart}>
+      <div className={css.simChartHead}>
+        <p className={css.simChartTitle}>{t('sim.chartTitle')}</p>
+        <div className={css.simLegend}>
+          {sims.map((sim, index) => (
+            <span key={sim.kind}>
+              <span className={css.simDot} style={{ background: colorAt(index) }} aria-hidden="true" />
+              {sim.title}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className={css.simApex} role="img" aria-label={t('sim.chartTitle')}>
+        <Chart options={options}
+          series={sims.map(sim => ({
+            name: sim.title,
+            data: sim.series.map(point => ({ x: toTimestamp(point.date), y: point.nav })),
+          }))}
+          type="line" height={compact ? '100%' : 160} width="100%" />
+      </div>
+    </div>
+  )
+}
+
+/** 单套模拟盘：账户读数 + 持仓 / 次日信号 / 最近成交。 */
+function SimCard({ sim, t }: { sim: SimRecord; t: TranslateNS<typeof NS> }): ReactNode {
+  const tone = sim.returnPct >= 0 ? css.toneError : css.toneSuccess
+  return (
+    <div className={css.simBlock} data-sim-kind={sim.kind}>
+      <div className={css.simHead}>
+        <div className={css.simHeadText}>
+          <h3>{sim.title}</h3>
+          <p className={css.quantMeta}>{t('sim.meta', { strat: sim.strat, date: sim.simStart })}</p>
+        </div>
+        <span className={`${css.quantBadge} ${tone}`}>{signedPercent(sim.returnPct)}</span>
+      </div>
+      <div className={css.simStats}>
+        <div className={css.simStat}>
+          <span>{t('sim.equity')}</span>
+          <strong>{t('fund.money', { value: formatNumber(sim.equity) })}</strong>
+        </div>
+        <div className={css.simStat}>
+          <span>{t('sim.drawdown')}</span>
+          <strong>{sim.maxDrawdownPct.toFixed(2)}%</strong>
+        </div>
+        <div className={css.simStat}>
+          <span>{t('sim.cash')}</span>
+          <strong>{sim.cashPct.toFixed(1)}%</strong>
+        </div>
+      </div>
+
+      <div className={css.simSection}>
+        <h4>{t('sim.positions')}</h4>
+        {sim.positions.length === 0
+          ? <p className={css.simEmpty}>{t('sim.noPositions')}</p>
+          : (
+            <ul className={css.simList}>
+              {sim.positions.map(position => (
+                <li key={position.code} className={css.simRow}>
+                  <span className={css.simNameCol}>
+                    <span className={css.simName}>
+                      {position.name} <span className={css.simCode}>{position.code}</span>
+                    </span>
+                    <span className={css.simMeta}>
+                      {t('sim.positionRow', {
+                        shares: formatNumber(position.shares),
+                        cost: position.avgCost.toFixed(3),
+                      })}
+                    </span>
+                  </span>
+                  <span className={css.simVal}>
+                    {t('sim.weight', { value: position.weightPct.toFixed(1) })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+
+      <div className={css.simSection}>
+        <h4>{t('sim.signals')}</h4>
+        {sim.signals.length === 0
+          ? <p className={css.simEmpty}>{t('sim.noSignals')}</p>
+          : (
+            <ul className={css.simList}>
+              {sim.signals.map(signal => (
+                <li key={`${signal.side}-${signal.code}`} className={css.simRow}>
+                  <span className={`${css.simChip} ${signal.side === 'buy' ? css.simChipBuy : css.simChipSell}`}>
+                    {t(signal.side === 'buy' ? 'fund.buyShort' : 'fund.sellShort')}
+                  </span>
+                  <span className={css.simNameCol}>
+                    <span className={css.simName}>
+                      {signal.name} <span className={css.simCode}>{signal.code}</span>
+                    </span>
+                    {signal.note !== '' && <span className={css.simMeta}>{signal.note}</span>}
+                  </span>
+                  <span className={css.simVal}>
+                    {signal.side === 'buy'
+                      ? t('fund.money', { value: formatNumber(signal.value) })
+                      : t('sim.clearAll')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+
+      <div className={css.simSection}>
+        <h4>{t('sim.trades')}</h4>
+        {sim.trades.length === 0
+          ? <p className={css.simEmpty}>{t('sim.emptyTrades')}</p>
+          : (
+            <ul className={css.simList}>
+              {sim.trades.map(trade => (
+                <li key={`${trade.date}-${trade.code}-${trade.side}`} className={css.simRow}>
+                  <span className={`${css.simChip} ${trade.side === 'buy' ? css.simChipBuy : css.simChipSell}`}>
+                    {t(trade.side === 'buy' ? 'fund.buyShort' : 'fund.sellShort')}
+                  </span>
+                  <span className={css.simNameCol}>
+                    <span className={css.simName}>{trade.name}</span>
+                    <span className={css.simMeta}>
+                      {trade.date} · {t('sim.tradeRow', {
+                        shares: formatNumber(trade.shares),
+                        price: trade.price.toFixed(3),
+                      })}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+    </div>
+  )
+}
+
+/** 百分比带符号：闸门读数已是百分数，不做比例换算。 */
+function signedPercent(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+}
+
+function signedNumber(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
+}
+
 /** 主机指标小卡：数值 + 使用率进度条。 */
 function HostStat({ label, value, detail, percent, tone }: {
   label: string
@@ -1117,56 +1343,18 @@ function HostStat({ label, value, detail, percent, tone }: {
 }
 
 /** Workspace, Session, scheduled-task, and background-job status page. */
-export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDirectory, readFile, t }: DashboardProps): ReactNode {
-  const cwd = useSessions(state => selectSessionDirectory(state, sessionId))
-  const jobs = useJobs(state => state.rows[sessionId]) ?? NO_JOBS
+export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode {
   const [reload, setReload] = useState(0)
-  const [fileState, setFileState] = useState<FileState>({ status: 'loading' })
-  const [dailyState, setDailyState] = useState<DailyState>({ status: 'loading' })
   const [fundState, setFundState] = useState<FundState>({ status: 'loading' })
   const [hostState, setHostState] = useState<HostState>({ status: 'loading' })
+  const [quantState, setQuantState] = useState<QuantState>({ status: 'loading' })
   const [selectedFund, setSelectedFund] = useState('')
-
-  useEffect(() => watchRows(sessionId), [sessionId, watchRows])
-  useEffect(() => {
-    if (cwd === undefined) {
-      setFileState({ status: 'error' })
-      return
-    }
-    const controller = new AbortController()
-    let active = true
-    setFileState({ status: 'loading' })
-    void scanWorkspace(sessionId, cwd, listDirectory, controller.signal).then(stats => {
-      if (active) setFileState({ status: 'ready', stats })
-    }).catch(() => {
-      if (active && !controller.signal.aborted) setFileState({ status: 'error' })
-    })
-    return () => {
-      active = false
-      controller.abort()
-    }
-  }, [sessionId, cwd, listDirectory, reload])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let active = true
-    setDailyState({ status: 'loading' })
-    void loadDailyState(sessionId, readFile, controller.signal).then(next => {
-      if (active) setDailyState(next)
-    }).catch(() => {
-      if (active && !controller.signal.aborted) setDailyState({ status: 'error' })
-    })
-    return () => {
-      active = false
-      controller.abort()
-    }
-  }, [sessionId, readFile, reload])
 
   useEffect(() => {
     const controller = new AbortController()
     let active = true
     setFundState({ status: 'loading' })
-    void loadFundState(sessionId, readFile, controller.signal).then(next => {
+    void loadFundState(sessionId, readFile, controller.signal).then((next) => {
       if (active) setFundState(next)
     }).catch(() => {
       if (active && !controller.signal.aborted) setFundState({ status: 'error' })
@@ -1181,7 +1369,7 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
     const controller = new AbortController()
     let active = true
     setHostState({ status: 'loading' })
-    void loadHostState(sessionId, readFile, controller.signal).then(next => {
+    void loadHostState(sessionId, readFile, controller.signal).then((next) => {
       if (active) setHostState(next)
     }).catch(() => {
       if (active && !controller.signal.aborted) setHostState({ status: 'error' })
@@ -1192,23 +1380,31 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
     }
   }, [sessionId, readFile, reload])
 
-  const visibleJobs = useMemo(() => orderedJobs(jobs).slice(0, 6), [jobs])
-  const stats = fileState.status === 'ready' ? fileState.stats : undefined
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setQuantState({ status: 'loading' })
+    void loadQuantState(sessionId, readFile, controller.signal).then((next) => {
+      if (active) setQuantState(next)
+    }).catch(() => {
+      if (active && !controller.signal.aborted) setQuantState({ status: 'error' })
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [sessionId, readFile, reload])
+
   const host = hostState.status === 'ready' ? hostState.metrics : undefined
   const hostTone = (percent: number): string => (
     percent >= 85 ? (css.toneError ?? '') : percent >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')
   )
   const temperature = host?.temperature ?? undefined
-  const fileSegments: ChartSegment[] = stats === undefined ? [] : FILE_CATEGORIES.flatMap((category, index) => {
-    const value = stats.categories[category]
-    if (value === 0) return []
-    const tones: readonly Tone[] = ['toneBusiness', 'toneSuccess', 'toneWarning', 'toneError', 'toneMuted', 'toneBusiness']
-    return [{ key: category, label: t(`category.${category}`), value, tone: tones[index] ?? 'toneMuted' }]
-  })
-  const dailySubtitle = dailyState.status === 'ready' && dailyState.date !== undefined
-    ? t(dailyState.historical ? 'daily.historical' : 'daily.date', { date: dailyState.date })
-    : t('daily.subtitle')
   const fundSnapshot = fundState.status === 'ready' ? fundState.snapshot : undefined
+  const quantSnapshot = quantState.status === 'ready' ? quantState.snapshot : undefined
+  const sims = quantSnapshot?.sims ?? []
+  const simAsOf = sims.reduce((latest, sim) => (sim.asOf > latest ? sim.asOf : latest), '')
+  const simHasSeries = sims.some(sim => sim.series.length > 1)
   const funds = fundSnapshot?.funds.filter(fund => fund.holding && fund.shares > 0) ?? []
   const fundSummary = useMemo(() => {
     if (fundSnapshot === undefined) return undefined
@@ -1272,170 +1468,170 @@ export function Dashboard({ sessionId, useSessions, useJobs, watchRows, listDire
         )}
       </section>
 
-      <div className={css.split}>
-      <section className={css.card} data-fund-panel>
+      <section className={`${css.card} ${css.quantCard}`} data-quant-panel>
         <div className={css.sectionHeader}>
           <div>
-            <h2>{t('fund.title')}</h2>
-            <p>{t('fund.subtitle', {
-              date: fundSnapshot !== undefined && fundSnapshot.asOf !== '' ? fundSnapshot.asOf : '—',
+            <h2>{t('quant.title')}</h2>
+            <p>{t('quant.subtitle', {
+              date: quantSnapshot !== undefined && quantSnapshot.asOf !== '' ? quantSnapshot.asOf : '—',
             })}</p>
           </div>
-          {fundSummary !== undefined && (
-            <span className={css.count}>{t('fund.held', { count: fundSummary.held.length })}</span>
+          {quantSnapshot !== undefined && (
+            <span className={css.count}>
+              {t('quant.openCount', { count: quantSnapshot.gates.filter(gate => gate.open).length })}
+            </span>
           )}
         </div>
-        {fundState.status === 'loading' && <p className={css.emptyBlock}>{t('fund.loading')}</p>}
-        {(fundState.status === 'missing' || fundState.status === 'error' || fundState.status === 'invalid') && (
+        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('quant.loading')}</p>}
+        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
           <div className={css.emptyBlock}>
-            <p>{t(fundState.status === 'missing' ? 'fund.missing'
-              : fundState.status === 'invalid' ? 'fund.invalid' : 'fund.error')}</p>
+            <p>{t(quantState.status === 'missing' ? 'quant.missing'
+              : quantState.status === 'invalid' ? 'quant.invalid' : 'quant.error')}</p>
             <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
-              {t('fund.retry')}
+              {t('quant.retry')}
             </button>
           </div>
         )}
-        {fundState.status === 'ready' && activeFund === undefined && (
-          <p className={css.emptyBlock}>{t('fund.empty')}</p>
-        )}
-        {fundSummary !== undefined && activeFund !== undefined && (
+        {quantSnapshot !== undefined && (
           <>
-            <div className={css.fundSummary}>
-              <div className={css.fundStat}>
-                <span>{t('fund.totalValue')}</span>
-                <strong>{t('fund.money', { value: formatNumber(fundSummary.value) })}</strong>
-              </div>
-              <div className={css.fundStat}>
-                <span>{t('fund.totalCost')}</span>
-                <strong>{t('fund.money', { value: formatNumber(fundSummary.cost) })}</strong>
-              </div>
-              <div className={css.fundStat}>
-                <span>{t('fund.pnl')}</span>
-                <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
-                  {signedMoney(fundSummary.pnl, t)}
-                </strong>
-              </div>
-              <div className={css.fundStat}>
-                <span>{t('fund.return')}</span>
-                <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
-                  {fundSummary.rate === undefined ? '—' : formatPercent(fundSummary.rate)}
-                </strong>
-              </div>
+            <div className={css.quantGrid}>
+              {quantSnapshot.gates.map(gate => <GateCard key={gate.kind} gate={gate} t={t} />)}
             </div>
-            <div className={css.fundChips}>
-              {funds.map(fund => (
-                <button key={fund.code} type="button" aria-pressed={fund.code === activeFund.code}
-                  className={`${css.fundChip} ${fund.code === activeFund.code ? css.fundChipActive : ''}`}
-                  onClick={() => setSelectedFund(fund.code)}>
-                  <span className={`${css.fundChipDot} ${fund.holding ? css.toneBusiness : css.toneMuted}`}
-                    aria-hidden="true" />
-                  {fund.name}
-                </button>
-              ))}
-            </div>
-            <FundChart fund={activeFund} t={t} />
-            <ul className={css.fundList}>
-              {fundSummary.held.map(fund => (
-                <li key={fund.code} className={css.fundRow}>
-                  <div className={css.fundRowMain}>
-                    <div className={css.fundNameRow}>
-                      <span className={css.dailyName} title={fund.name}>{fund.name}</span>
-                      <span className={css.fundCode}>{fund.code}</span>
-                    </div>
-                    <span className={css.fundMeta}>
-                      {t('fund.shares', { value: formatNumber(fund.shares) })} · {t('fund.cost')}{' '}
-                      {fund.cost.toFixed(4)} → {fund.nav.toFixed(4)}
-                    </span>
-                  </div>
-                  <div className={css.fundRowValue}>
-                    <strong>{t('fund.money', { value: formatNumber(fund.shares * fund.nav) })}</strong>
-                    <span className={fund.nav >= fund.cost ? css.toneError : css.toneSuccess}>
-                      {formatPercent(fund.cost > 0 ? fund.nav / fund.cost - 1 : 0)}
-                    </span>
-                  </div>
-                </li>
-              ))}
-
-            </ul>
-            <p className={css.footnote}>{t('fund.note')}</p>
-            {fundSnapshot !== undefined && fundSnapshot.source !== '' && (
-              <p className={css.footnote}>{t('fund.source', { source: fundSnapshot.source })}</p>
+            <p className={css.footnote}>{t('quant.note')}</p>
+            {quantSnapshot.source !== '' && (
+              <p className={css.footnote}>{t('quant.source', { source: quantSnapshot.source })}</p>
             )}
           </>
         )}
       </section>
 
-      <section className={css.card} data-daily-tasks>
+      <section className={`${css.card} ${css.simCard}`} data-sim-panel>
         <div className={css.sectionHeader}>
-          <div><h2>{t('daily.title')}</h2><p>{dailySubtitle}</p></div>
-          {dailyState.status === 'ready' && <span className={css.count}>{t('daily.total', { count: dailyState.tasks.length })}</span>}
+          <div>
+            <h2>{t('sim.title')}</h2>
+            <p>{t('sim.subtitle', { date: simAsOf !== '' ? simAsOf : (quantSnapshot?.asOf ?? '') || '—' })}</p>
+          </div>
+          {sims.length > 0 && <span className={css.count}>{t('sim.count', { count: sims.length })}</span>}
         </div>
-        {dailyState.status === 'loading' && <p className={css.emptyBlock}>{t('daily.loading')}</p>}
-        {(dailyState.status === 'missing' || dailyState.status === 'error' || dailyState.status === 'invalid') && (
+        {quantState.status === 'loading' && <p className={css.emptyBlock}>{t('sim.loading')}</p>}
+        {(quantState.status === 'missing' || quantState.status === 'error' || quantState.status === 'invalid') && (
           <div className={css.emptyBlock}>
-            <p>{t(dailyState.status === 'missing' ? 'daily.missing' : dailyState.status === 'invalid' ? 'daily.invalid' : 'daily.error')}</p>
-            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>{t('daily.retry')}</button>
+            <p>{t(quantState.status === 'missing' ? 'sim.missing'
+              : quantState.status === 'invalid' ? 'sim.invalid' : 'sim.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('sim.retry')}
+            </button>
           </div>
         )}
-        {dailyState.status === 'ready' && dailyState.tasks.length === 0 && <p className={css.emptyBlock}>{t('daily.empty')}</p>}
-        {dailyState.status === 'ready' && dailyState.tasks.length > 0 && (
-          <ul className={css.dailyList}>
-            {dailyState.tasks.map(task => (
-              <li key={task.name}>
-                <StateDot state={dailyDotState(task.result)} />
-                <div className={css.dailyMain}>
-                  <div className={css.dailyNameRow}>
-                    <span className={css.dailyName} title={task.name}>{task.name}</span>
-                    <span className={css.dailySchedule}>{task.schedule}</span>
-                  </div>
-                  {task.result?.detail !== undefined && task.result.detail !== '' && (
-                    <span className={css.dailyDetail} title={task.result.detail}>{task.result.detail}</span>
-                  )}
-                </div>
-                <span className={css.dailyStatus}>{dailyStatusLabel(task.result, t)}</span>
-              </li>
-            ))}
-          </ul>
+        {quantSnapshot !== undefined && sims.length === 0 && (
+          <p className={css.emptyBlock}>{t('sim.empty')}</p>
         )}
-      </section>
-
-      <section className={css.card}>
-        <div className={css.sectionHeader}>
-          <div><h2>{t('jobs.title')}</h2><p>{t('jobs.current')}</p></div>
-          <span className={css.count}>{t('jobs.total', { count: jobs.length })}</span>
-        </div>
-        {visibleJobs.length === 0 ? <p className={css.emptyBlock}>{t('jobs.empty')}</p> : (
-          <ul className={css.jobList}>
-            {visibleJobs.map(job => (
-              <li key={String(job.id)}>
-                <StateDot state={jobDotState(job)} />
-                <span className={css.jobLabel} title={job.label}>{job.label}</span>
-                <span className={css.jobStatus}>{statusLabel(job.status, t)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className={css.card}>
-        <div className={css.sectionHeader}>
-          <div><h2>{t('files.title')}</h2><p>{t('files.subtitle')}</p></div>
-          {stats !== undefined && <span className={css.count}>{t('files.directories', { count: stats.directories })}</span>}
-        </div>
-        {fileState.status === 'loading' && <p className={css.emptyBlock}>{t('files.loading')}</p>}
-        {fileState.status === 'error' && (
-          <div className={css.emptyBlock}>
-            <p>{t('files.error')}</p>
-            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>{t('files.retry')}</button>
-          </div>
-        )}
-        {stats !== undefined && (
+        {quantSnapshot !== undefined && sims.length > 0 && (
           <>
-            <DonutChart title={t('files.title')} segments={fileSegments} totalLabel={t('chart.total')} emptyLabel={t('chart.empty')} />
-            <p className={css.footnote}>{t(stats.truncated ? 'files.truncated' : 'files.complete')}</p>
+            {simHasSeries && <SimCompare sims={sims} t={t} />}
+            <div className={css.simGrid}>
+              {sims.map(sim => <SimCard key={sim.kind} sim={sim} t={t} />)}
+            </div>
+            <p className={css.footnote}>{t('sim.note')}</p>
+            {quantSnapshot.simSource !== '' && (
+              <p className={css.footnote}>{t('sim.source', { source: quantSnapshot.simSource })}</p>
+            )}
           </>
         )}
       </section>
+
+      <div className={css.split}>
+        <section className={css.card} data-fund-panel>
+          <div className={css.sectionHeader}>
+            <div>
+              <h2>{t('fund.title')}</h2>
+              <p>{t('fund.subtitle', {
+                date: fundSnapshot !== undefined && fundSnapshot.asOf !== '' ? fundSnapshot.asOf : '—',
+              })}</p>
+            </div>
+            {fundSummary !== undefined && (
+              <span className={css.count}>{t('fund.held', { count: fundSummary.held.length })}</span>
+            )}
+          </div>
+          {fundState.status === 'loading' && <p className={css.emptyBlock}>{t('fund.loading')}</p>}
+          {(fundState.status === 'missing' || fundState.status === 'error' || fundState.status === 'invalid') && (
+            <div className={css.emptyBlock}>
+              <p>{t(fundState.status === 'missing' ? 'fund.missing'
+                : fundState.status === 'invalid' ? 'fund.invalid' : 'fund.error')}</p>
+              <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+                {t('fund.retry')}
+              </button>
+            </div>
+          )}
+          {fundState.status === 'ready' && activeFund === undefined && (
+            <p className={css.emptyBlock}>{t('fund.empty')}</p>
+          )}
+          {fundSummary !== undefined && activeFund !== undefined && (
+            <>
+              <div className={css.fundSummary}>
+                <div className={css.fundStat}>
+                  <span>{t('fund.totalValue')}</span>
+                  <strong>{t('fund.money', { value: formatNumber(fundSummary.value) })}</strong>
+                </div>
+                <div className={css.fundStat}>
+                  <span>{t('fund.totalCost')}</span>
+                  <strong>{t('fund.money', { value: formatNumber(fundSummary.cost) })}</strong>
+                </div>
+                <div className={css.fundStat}>
+                  <span>{t('fund.pnl')}</span>
+                  <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
+                    {signedMoney(fundSummary.pnl, t)}
+                  </strong>
+                </div>
+                <div className={css.fundStat}>
+                  <span>{t('fund.return')}</span>
+                  <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
+                    {fundSummary.rate === undefined ? '—' : formatPercent(fundSummary.rate)}
+                  </strong>
+                </div>
+              </div>
+              <div className={css.fundChips}>
+                {funds.map(fund => (
+                  <button key={fund.code} type="button" aria-pressed={fund.code === activeFund.code}
+                    className={`${css.fundChip} ${fund.code === activeFund.code ? css.fundChipActive : ''}`}
+                    onClick={() => { setSelectedFund(fund.code) }}>
+                    <span className={`${css.fundChipDot} ${fund.holding ? css.toneBusiness : css.toneMuted}`}
+                      aria-hidden="true" />
+                    {fund.name}
+                  </button>
+                ))}
+              </div>
+              <FundChart fund={activeFund} t={t} />
+              <ul className={css.fundList}>
+                {fundSummary.held.map(fund => (
+                  <li key={fund.code} className={css.fundRow}>
+                    <div className={css.fundRowMain}>
+                      <div className={css.fundNameRow}>
+                        <span className={css.dailyName} title={fund.name}>{fund.name}</span>
+                        <span className={css.fundCode}>{fund.code}</span>
+                      </div>
+                      <span className={css.fundMeta}>
+                        {t('fund.shares', { value: formatNumber(fund.shares) })} · {t('fund.cost')}{' '}
+                        {fund.cost.toFixed(4)} → {fund.nav.toFixed(4)}
+                      </span>
+                    </div>
+                    <div className={css.fundRowValue}>
+                      <strong>{t('fund.money', { value: formatNumber(fund.shares * fund.nav) })}</strong>
+                      <span className={fund.nav >= fund.cost ? css.toneError : css.toneSuccess}>
+                        {formatPercent(fund.cost > 0 ? fund.nav / fund.cost - 1 : 0)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+
+              </ul>
+              <p className={css.footnote}>{t('fund.note')}</p>
+              {fundSnapshot !== undefined && fundSnapshot.source !== '' && (
+                <p className={css.footnote}>{t('fund.source', { source: fundSnapshot.source })}</p>
+              )}
+            </>
+          )}
+        </section>
       </div>
     </div>
   )

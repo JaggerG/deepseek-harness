@@ -34,7 +34,7 @@ export const DASHBOARD_KIND = 'status'
 
 /** Required services: right-sidebar registration, live jobs, workspace files, slots, and copy. */
 export const inject = [
-  'slots', 'locale', 'layout', 'sidebarRightTabs', 'sidebarRight', 'jobs', 'remote', 'remote.workspaceFiles',
+  'slots', 'locale', 'layout', 'sidebarRightTabs', 'sidebarRight', 'remote', 'remote.workspaceFiles',
 ]
 
 /**
@@ -56,9 +56,6 @@ export function apply(ctx: ClientContext): void {
       key: DASHBOARD_ID,
       locale: NS,
       inject: (): DashboardInjected => ({
-        hooks: { jobs: ctx.jobs.state },
-        watchRows: sessionId => ctx.jobs.watchRows(sessionId),
-        listDirectory: (sessionId, path, signal) => ctx.remote.workspaceFiles.list(sessionId, path, signal),
         readFile: (sessionId, path, options, signal) => ctx.remote.workspaceFiles.readBytes(sessionId, path, options, signal),
       }),
     },
