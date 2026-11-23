@@ -1060,7 +1060,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
                   data: maOn.includes(window) ? [...(maData?.[window] ?? [])] : [],
                 })),
               ]}
-              type="line" height={CHART_HEIGHT} width="100%" />
+              type="line" height={compact ? '100%' : CHART_HEIGHT} width="100%" />
           </div>
         </div>
         <div className={css.fundChartBlock}>
@@ -1071,7 +1071,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
                 { name: t('fund.positive'), data: [...chart.returnUp] },
                 { name: t('fund.negative'), data: [...chart.returnDown] },
               ]}
-              type="line" height={CHART_HEIGHT} width="100%" />
+              type="line" height={compact ? '100%' : CHART_HEIGHT} width="100%" />
           </div>
         </div>
       </div>

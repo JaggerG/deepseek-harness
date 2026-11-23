@@ -712,6 +712,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* H5 上图表按 4:3 长宽比铺满卡片宽度，高度随宽度走。 */
+  .fundApex {
+    aspect-ratio: 4 / 3;
+    min-height: 0;
+  }
+
   .dailyList {
     max-height: none;
   }
