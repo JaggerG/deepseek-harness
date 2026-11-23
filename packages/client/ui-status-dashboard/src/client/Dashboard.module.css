@@ -97,6 +97,11 @@
   display: contents;
 }
 
+/* 基金面板铺满整行；两张图仍在同一行，按 4:3 随宽度缩放。 */
+.split > .fundCard {
+  grid-column: 1 / -1;
+}
+
 .sectionHeader {
   margin-bottom: 12px;
 }
@@ -341,7 +346,8 @@
 .fundApex {
   position: relative;
   width: 100%;
-  min-height: 150px;
+  aspect-ratio: 4 / 3;
+  min-height: 0;
 }
 
 .fundRange {
@@ -1042,12 +1048,6 @@
 
   .simApex {
     aspect-ratio: 16 / 9;
-    min-height: 0;
-  }
-
-  /* H5 上图表按 4:3 长宽比铺满卡片宽度，高度随宽度走。 */
-  .fundApex {
-    aspect-ratio: 4 / 3;
     min-height: 0;
   }
 

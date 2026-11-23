@@ -970,7 +970,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
                   data: maOn.includes(window) ? [...(maData?.[window] ?? [])] : [],
                 })),
               ]}
-              type="line" height={compact ? '100%' : CHART_HEIGHT} width="100%" />
+              type="line" height="100%" width="100%" />
           </div>
         </div>
         <div className={css.fundChartBlock}>
@@ -981,7 +981,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
                 { name: t('fund.positive'), data: [...chart.returnUp] },
                 { name: t('fund.negative'), data: [...chart.returnDown] },
               ]}
-              type="line" height={compact ? '100%' : CHART_HEIGHT} width="100%" />
+              type="line" height="100%" width="100%" />
           </div>
         </div>
       </div>
@@ -1469,7 +1469,7 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
       </section>
 
       <div className={css.split}>
-        <section className={css.card} data-fund-panel>
+        <section className={`${css.card} ${css.fundCard}`} data-fund-panel>
           <div className={css.sectionHeader}>
             <div>
               <h2>{t('fund.title')}</h2>
