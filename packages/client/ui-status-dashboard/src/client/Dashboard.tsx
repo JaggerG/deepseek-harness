@@ -32,6 +32,8 @@ const FUND_PANEL_PATH = 'scripts/fund_panel.json'
 const HOST_METRICS_PATH = 'scripts/scheduled-reports/logs/host_metrics.json'
 /** 量化闸门快照：scripts/export_quant_panel.py 由指数日线计算并落盘。 */
 const QUANT_PANEL_PATH = 'scripts/quant_panel.json'
+/** 消息面与股票池快照：news_collect.py 出摘要后调用 export_insight_panel.py 刷新。 */
+const INSIGHT_PANEL_PATH = 'scripts/insight_panel.json'
 const CHART_HEIGHT = 150
 
 /** Theme tokens ApexCharts needs as concrete colors (it cannot resolve CSS variables). */
@@ -164,6 +166,20 @@ interface GateProjection {
   readonly needPct: number
 }
 
+interface GateValuation {
+  readonly closePercentile: number | null
+  readonly closeMin: number
+  readonly closeMax: number
+  readonly devPercentile: number | null
+  readonly devMin: number
+  readonly devMax: number
+  readonly tier: number
+  readonly reasons: readonly string[]
+  readonly windowDays: number
+  readonly windowFrom: string
+  readonly windowTo: string
+}
+
 /** 单道牛熊闸门：指数收盘 vs 长期均线，关闭时策略强制空仓。 */
 interface GateRecord {
   readonly kind: string
@@ -180,6 +196,7 @@ interface GateRecord {
   readonly slope: number
   readonly series: readonly GatePoint[]
   readonly projection: readonly GateProjection[]
+  readonly valuation: GateValuation
 }
 
 interface SimPosition {
@@ -244,6 +261,103 @@ interface QuantSnapshot {
 type QuantState =
   | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
   | { readonly status: 'ready'; readonly snapshot: QuantSnapshot }
+
+/** 一条新闻（面板只保留标题级信息）。 */
+interface NewsItem {
+  readonly time: string
+  readonly source: string
+  readonly title: string
+  readonly score: number
+  readonly tier: string
+  readonly tags: readonly string[]
+  readonly sentiment: string
+}
+
+/** 某只持仓在消息面里的命中统计与头条。 */
+interface NewsHolding {
+  readonly code: string
+  readonly name: string
+  readonly count: number
+  readonly items: readonly NewsItem[]
+}
+
+interface NewsTheme {
+  readonly name: string
+  readonly count: number
+}
+
+interface NewsHealth {
+  readonly source: string
+  readonly ok: boolean
+  readonly count: number
+}
+
+interface NewsRecord {
+  readonly asOf: string
+  readonly hours: number
+  readonly total: number
+  readonly sTier: number
+  readonly aTier: number
+  readonly holdingsHit: number
+  readonly macro: number
+  readonly policy: number
+  readonly holdings: readonly NewsHolding[]
+  readonly themes: readonly NewsTheme[]
+  readonly health: readonly NewsHealth[]
+  readonly digest: string
+}
+
+type PoolKind = 'initial' | 'insight' | 'surge' | 'doc' | 'mail' | 'other'
+
+interface PoolHolding {
+  readonly code: string
+  readonly name: string
+  readonly etf: string
+  readonly icon: string
+}
+
+interface PoolKindCount {
+  readonly kind: PoolKind
+  readonly count: number
+}
+
+interface PoolRecent {
+  readonly date: string
+  readonly code: string
+  readonly name: string
+  readonly kind: PoolKind
+}
+
+interface PoolRecord {
+  readonly asOf: string
+  readonly holdings: readonly PoolHolding[]
+  readonly watchCount: number
+  readonly byKind: readonly PoolKindCount[]
+  readonly recent: readonly PoolRecent[]
+}
+
+interface InsightSnapshot {
+  readonly asOf: string
+  readonly news: NewsRecord | undefined
+  readonly pool: PoolRecord | undefined
+  readonly newsSource: string
+  readonly poolSource: string
+}
+
+type InsightState =
+  | { readonly status: 'loading' | 'error' | 'missing' | 'invalid' }
+  | { readonly status: 'ready'; readonly snapshot: InsightSnapshot }
+
+const POOL_KIND_KEY = {
+  initial: 'pool.kind.initial',
+  insight: 'pool.kind.insight',
+  surge: 'pool.kind.surge',
+  doc: 'pool.kind.doc',
+  mail: 'pool.kind.mail',
+  other: 'pool.kind.other',
+} as const
+
+const POOL_KINDS: readonly PoolKind[] = ['insight', 'surge', 'doc', 'mail', 'initial', 'other']
 
 type FundRangeKey = '1m' | '3m' | '6m' | '1y' | 'all'
 
@@ -443,6 +557,20 @@ function parseQuantSnapshot(text: string): QuantSnapshot {
       }
       return { days: rawItem.days, needPct: rawItem.need_pct }
     })
+    const v = isRecord(raw.valuation) ? raw.valuation : {}
+    const valuation: GateValuation = {
+      closePercentile: typeof v.close_percentile === 'number' ? v.close_percentile : null,
+      closeMin: typeof v.close_min === 'number' ? v.close_min : 0,
+      closeMax: typeof v.close_max === 'number' ? v.close_max : 1,
+      devPercentile: typeof v.dev_percentile === 'number' ? v.dev_percentile : null,
+      devMin: typeof v.dev_min === 'number' ? v.dev_min : -10,
+      devMax: typeof v.dev_max === 'number' ? v.dev_max : 10,
+      tier: typeof v.tier === 'number' ? v.tier : 0,
+      reasons: Array.isArray(v.reasons) ? v.reasons.filter((r): r is string => typeof r === 'string') : [],
+      windowDays: typeof v.window_days === 'number' ? v.window_days : 0,
+      windowFrom: typeof v.window_from === 'string' ? v.window_from : '',
+      windowTo: typeof v.window_to === 'string' ? v.window_to : '',
+    }
     return {
       kind: raw.kind,
       title: raw.title,
@@ -458,6 +586,7 @@ function parseQuantSnapshot(text: string): QuantSnapshot {
       slope: raw.ma_slope_20d,
       series,
       projection,
+      valuation,
     }
   })
   const sims = Array.isArray(root.sims) ? root.sims.map(parseSimRecord) : []
@@ -559,6 +688,134 @@ async function loadQuantState(
   }
   try {
     return { status: 'ready', snapshot: parseQuantSnapshot(new TextDecoder().decode(result.value.data)) }
+  } catch {
+    return { status: 'invalid' }
+  }
+}
+
+function parseNewsItem(raw: unknown): NewsItem {
+  if (!isRecord(raw) || typeof raw.time !== 'string' || typeof raw.source !== 'string'
+    || typeof raw.title !== 'string') {
+    throw new Error('Invalid news item')
+  }
+  return {
+    time: raw.time,
+    source: raw.source,
+    title: raw.title,
+    score: typeof raw.score === 'number' ? raw.score : 0,
+    tier: typeof raw.tier === 'string' ? raw.tier : '',
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+    sentiment: typeof raw.sentiment === 'string' ? raw.sentiment : '',
+  }
+}
+
+function parsePoolKind(value: unknown): PoolKind {
+  if (value === 'initial' || value === 'insight' || value === 'surge'
+    || value === 'doc' || value === 'mail') {
+    return value
+  }
+  return 'other'
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback
+}
+
+/** Validate the news + pool snapshot exported by scripts/export_insight_panel.py. */
+function parseInsightSnapshot(text: string): InsightSnapshot {
+  const root: unknown = JSON.parse(text)
+  if (!isRecord(root)) throw new Error('Invalid insight-panel root')
+  let news: NewsRecord | undefined
+  if (isRecord(root.news)) {
+    const raw = root.news
+    news = {
+      asOf: typeof raw.as_of === 'string' ? raw.as_of : '',
+      hours: numberOr(raw.hours, 24),
+      total: numberOr(raw.total, 0),
+      sTier: numberOr(raw.s_tier, 0),
+      aTier: numberOr(raw.a_tier, 0),
+      holdingsHit: numberOr(raw.holdings_hit, 0),
+      macro: numberOr(raw.macro, 0),
+      policy: numberOr(raw.policy, 0),
+      holdings: Array.isArray(raw.holdings) ? raw.holdings.map((item) => {
+        if (!isRecord(item) || typeof item.code !== 'string' || typeof item.name !== 'string'
+          || typeof item.count !== 'number') {
+          throw new Error('Invalid news holding')
+        }
+        return {
+          code: item.code,
+          name: item.name,
+          count: item.count,
+          items: Array.isArray(item.items) ? item.items.map(parseNewsItem) : [],
+        }
+      }) : [],
+      themes: Array.isArray(raw.themes) ? raw.themes.map((item) => {
+        if (!isRecord(item) || typeof item.name !== 'string' || typeof item.count !== 'number') {
+          throw new Error('Invalid news theme')
+        }
+        return { name: item.name, count: item.count }
+      }) : [],
+      health: Array.isArray(raw.health) ? raw.health.map((item) => {
+        if (!isRecord(item) || typeof item.source !== 'string'
+          || typeof item.ok !== 'boolean' || typeof item.count !== 'number') {
+          throw new Error('Invalid news health')
+        }
+        return { source: item.source, ok: item.ok, count: item.count }
+      }) : [],
+      digest: typeof raw.digest === 'string' ? raw.digest : '',
+    }
+  }
+  let pool: PoolRecord | undefined
+  if (isRecord(root.pool)) {
+    const raw = root.pool
+    pool = {
+      asOf: typeof raw.as_of === 'string' ? raw.as_of : '',
+      holdings: Array.isArray(raw.holdings) ? raw.holdings.map((item) => {
+        if (!isRecord(item) || typeof item.code !== 'string' || typeof item.name !== 'string') {
+          throw new Error('Invalid pool holding')
+        }
+        return {
+          code: item.code,
+          name: item.name,
+          etf: typeof item.etf === 'string' ? item.etf : '',
+          icon: typeof item.icon === 'string' ? item.icon : '',
+        }
+      }) : [],
+      watchCount: numberOr(raw.watch_count, 0),
+      byKind: Array.isArray(raw.by_kind) ? raw.by_kind.map((item) => {
+        if (!isRecord(item) || typeof item.count !== 'number') throw new Error('Invalid pool kind')
+        return { kind: parsePoolKind(item.kind), count: item.count }
+      }) : [],
+      recent: Array.isArray(raw.recent) ? raw.recent.map((item) => {
+        if (!isRecord(item) || typeof item.date !== 'string' || typeof item.code !== 'string'
+          || typeof item.name !== 'string') {
+          throw new Error('Invalid pool recent')
+        }
+        return { date: item.date, code: item.code, name: item.name, kind: parsePoolKind(item.kind) }
+      }) : [],
+    }
+  }
+  return {
+    asOf: typeof root.as_of === 'string' ? root.as_of : '',
+    news,
+    pool,
+    newsSource: typeof root.news_source === 'string' ? root.news_source : '',
+    poolSource: typeof root.pool_source === 'string' ? root.pool_source : '',
+  }
+}
+
+async function loadInsightState(
+  sessionId: SessionId,
+  readFile: ClientRemote['workspaceFiles']['readBytes'],
+  signal: AbortSignal,
+): Promise<InsightState> {
+  const result = await readFile(sessionId, INSIGHT_PANEL_PATH, {}, signal)
+  if (!result.ok) {
+    if (result.error.code === 'workspace-file/not-found') return { status: 'missing' }
+    throw new Error(result.error.message)
+  }
+  try {
+    return { status: 'ready', snapshot: parseInsightSnapshot(new TextDecoder().decode(result.value.data)) }
   } catch {
     return { status: 'invalid' }
   }
@@ -1075,6 +1332,53 @@ function GateCard({ gate, t }: { gate: GateRecord; t: TranslateNS<typeof NS> }):
           ]}
           type="line" height={compact ? '100%' : 120} width="100%" />
       </div>
+      {(() => {
+        const v = gate.valuation
+        const tierKey = v.tier >= 2
+          ? 'quant.valuation.tier.undervalued'
+          : v.tier === 1
+            ? 'quant.valuation.tier.bargain'
+            : v.tier === 0
+              ? 'quant.valuation.tier.normal'
+              : v.tier === -1
+                ? 'quant.valuation.tier.rich'
+                : 'quant.valuation.tier.overvalued'
+        const tierClass = v.tier >= 2
+          ? css.tierUndervalued
+          : v.tier === 1
+            ? css.tierBargain
+            : v.tier === 0
+              ? css.tierNormal
+              : v.tier === -1
+                ? css.tierRich
+                : css.tierOvervalued
+        return (
+          <div className={css.quantValuation}>
+            <div className={css.quantValuationHead}>
+              <h4 className={css.quantValuationTitle}>{t('quant.valuation.title')}</h4>
+              <span className={`${css.quantValuationTier} ${tierClass}`}>{t(tierKey)}</span>
+            </div>
+            <div className={css.quantValItem}>
+              <span>{t('quant.valuation.closePct')}</span>
+              <strong>{v.closePercentile !== null ? `${v.closePercentile.toFixed(1)}%` : '—'}</strong>
+              <div className={css.quantValBar}><span style={{ width: `${v.closePercentile ?? 0}%` }} /></div>
+            </div>
+            <div className={css.quantValItem}>
+              <span>{t('quant.valuation.devPct')}</span>
+              <strong>{v.devPercentile !== null ? `${v.devPercentile.toFixed(1)}%` : '—'}</strong>
+              <div className={css.quantValBar}><span style={{ width: `${v.devPercentile ?? 0}%` }} /></div>
+            </div>
+            <div className={css.quantValWindow}>
+              {t('quant.valuation.window', { days: v.windowDays, from: v.windowFrom, to: v.windowTo })}
+            </div>
+            {v.reasons.length > 0 && (
+              <div className={css.quantValReasons}>
+                {t('quant.valuation.reasonIntro', { reasons: v.reasons.join('，') })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
       <div className={css.quantFoot}>
         <span>{t('quant.slope', { n: gate.maN, value: signedNumber(gate.slope) })}</span>
         {!gate.open && <span>{t('quant.projection', { values: projection })}</span>}
@@ -1280,6 +1584,140 @@ function SimCard({ sim, t }: { sim: SimRecord; t: TranslateNS<typeof NS> }): Rea
   )
 }
 
+/** 消息面卡片：24h 分层、持仓命中头条、主题热度与采集健康。 */
+function NewsCard({ news, t, source }: {
+  news: NewsRecord
+  t: TranslateNS<typeof NS>
+  source: string
+}): ReactNode {
+  const hits = news.holdings.filter(row => row.count > 0)
+  const healthy = news.health.filter(row => row.ok).length
+  return (
+    <>
+      <div className={css.infoStats}>
+        <div className={css.infoStat}>
+          <span>{t('news.tierTitle')}</span>
+          <strong>{t('news.tierValue', { s: news.sTier, a: news.aTier })}</strong>
+        </div>
+        <div className={css.infoStat}>
+          <span>{t('news.holdingsHit')}</span>
+          <strong>{t('news.unit', { count: news.holdingsHit })}</strong>
+        </div>
+        <div className={css.infoStat}>
+          <span>{t('news.macro')}</span>
+          <strong>{t('news.unit', { count: news.macro })}</strong>
+        </div>
+        <div className={css.infoStat}>
+          <span>{t('news.policy')}</span>
+          <strong>{t('news.unit', { count: news.policy })}</strong>
+        </div>
+      </div>
+
+      <div className={css.newsSection}>
+        <h4>{t('news.holdingsTitle')}</h4>
+        {hits.length === 0
+          ? <p className={css.simEmpty}>{t('news.noHoldings')}</p>
+          : hits.map(row => (
+            <div key={row.code} className={css.newsHolding}>
+              <div className={css.newsHoldingHead}>
+                <span className={css.newsName}>
+                  {row.name} <span className={css.newsCode}>{row.code}</span>
+                </span>
+                <span className={css.count}>{t('news.unit', { count: row.count })}</span>
+              </div>
+              {row.items.slice(0, 2).map(item => (
+                <p key={`${item.time}-${item.title}`} className={css.newsHeadline} title={item.title}>
+                  <span className={css.newsMeta}>
+                    {item.time} · {item.source}
+                    {item.tier !== '' ? ` · ${item.score}·${item.tier}` : ''}
+                  </span>
+                  {item.title}
+                </p>
+              ))}
+            </div>
+          ))}
+      </div>
+
+      {news.themes.length > 0 && (
+        <div className={css.newsThemes}>
+          {news.themes.slice(0, 6).map(theme => (
+            <span key={theme.name} className={css.newsTheme}>
+              {theme.name} <strong>{theme.count}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className={css.footnote}>
+        {t('news.health', { ok: healthy, total: news.health.length })} · {t('news.note')}
+      </p>
+      {source !== '' && <p className={css.footnote}>{t('news.source', { source })}</p>}
+    </>
+  )
+}
+
+/** 股票池卡片：持仓、监测来源分布与近期新增。 */
+function PoolCard({ pool, t, source }: {
+  pool: PoolRecord
+  t: TranslateNS<typeof NS>
+  source: string
+}): ReactNode {
+  const kinds = POOL_KINDS
+    .map(kind => pool.byKind.find(row => row.kind === kind))
+    .filter((row): row is PoolKindCount => row !== undefined && row.count > 0)
+  return (
+    <>
+      <div className={css.poolSection}>
+        <h4>{t('pool.holdingsChips')}</h4>
+        <div className={css.poolChips}>
+          {pool.holdings.map(item => (
+            <span key={item.code} className={css.poolChip}>
+              <span className={css.poolIcon} aria-hidden="true">{item.icon}</span>
+              {item.name}
+              <span className={css.newsCode}>{item.code}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className={css.poolSection}>
+        <h4>{t('pool.watchTitle')}</h4>
+        <div className={css.poolChips}>
+          {kinds.map(row => (
+            <span key={row.kind} className={`${css.poolChip} ${css.poolChipMuted}`}>
+              {t(POOL_KIND_KEY[row.kind])}
+              <strong>{row.count}</strong>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className={css.newsSection}>
+        <h4>{t('pool.recentTitle')}</h4>
+        {pool.recent.length === 0
+          ? <p className={css.simEmpty}>{t('pool.noRecent')}</p>
+          : (
+            <ul className={css.poolList}>
+              {pool.recent.slice(0, 5).map(item => (
+                <li key={`${item.date}-${item.code}`} className={css.poolRow}>
+                  <span className={css.poolName} title={item.name}>
+                    {item.name} <span className={css.newsCode}>{item.code}</span>
+                  </span>
+                  <span className={css.poolMeta}>
+                    {item.date} · {t(POOL_KIND_KEY[item.kind])}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+
+      <p className={css.footnote}>{t('pool.note')}</p>
+      {source !== '' && <p className={css.footnote}>{t('pool.source', { source })}</p>}
+    </>
+  )
+}
+
 /** 百分比带符号：闸门读数已是百分数，不做比例换算。 */
 function signedPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
@@ -1316,6 +1754,7 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
   const [fundState, setFundState] = useState<FundState>({ status: 'loading' })
   const [hostState, setHostState] = useState<HostState>({ status: 'loading' })
   const [quantState, setQuantState] = useState<QuantState>({ status: 'loading' })
+  const [insightState, setInsightState] = useState<InsightState>({ status: 'loading' })
   const [selectedFund, setSelectedFund] = useState('')
 
   useEffect(() => {
@@ -1363,6 +1802,21 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
     }
   }, [sessionId, readFile, reload])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setInsightState({ status: 'loading' })
+    void loadInsightState(sessionId, readFile, controller.signal).then((next) => {
+      if (active) setInsightState(next)
+    }).catch(() => {
+      if (active && !controller.signal.aborted) setInsightState({ status: 'error' })
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [sessionId, readFile, reload])
+
   const host = hostState.status === 'ready' ? hostState.metrics : undefined
   const hostTone = (percent: number): string => (
     percent >= 85 ? (css.toneError ?? '') : percent >= 70 ? (css.toneWarning ?? '') : (css.toneBusiness ?? '')
@@ -1370,6 +1824,7 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
   const temperature = host?.temperature ?? undefined
   const fundSnapshot = fundState.status === 'ready' ? fundState.snapshot : undefined
   const quantSnapshot = quantState.status === 'ready' ? quantState.snapshot : undefined
+  const insightSnapshot = insightState.status === 'ready' ? insightState.snapshot : undefined
   const sims = quantSnapshot?.sims ?? []
   const simAsOf = sims.reduce((latest, sim) => (sim.asOf > latest ? sim.asOf : latest), '')
   const simHasSeries = sims.some(sim => sim.series.length > 1)
@@ -1529,6 +1984,74 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
           )}
         </section>
       </div>
+
+      <section className={`${css.card} ${css.insightCard}`} data-news-panel>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('news.title')}</h2>
+            <p>{t('news.subtitle', {
+              hours: insightSnapshot?.news?.hours ?? 24,
+              date: insightSnapshot?.news !== undefined && insightSnapshot.news.asOf !== ''
+                ? insightSnapshot.news.asOf : '—',
+            })}</p>
+          </div>
+          {insightSnapshot?.news !== undefined && (
+            <span className={css.count}>{t('news.count', { count: insightSnapshot.news.total })}</span>
+          )}
+        </div>
+        {insightState.status === 'loading' && <p className={css.emptyBlock}>{t('news.loading')}</p>}
+        {(insightState.status === 'missing' || insightState.status === 'error'
+          || insightState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(insightState.status === 'missing' ? 'news.missing'
+              : insightState.status === 'invalid' ? 'news.invalid' : 'news.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('news.retry')}
+            </button>
+          </div>
+        )}
+        {insightSnapshot !== undefined && insightSnapshot.news === undefined && (
+          <p className={css.emptyBlock}>{t('news.empty')}</p>
+        )}
+        {insightSnapshot?.news !== undefined && (
+          <NewsCard news={insightSnapshot.news} t={t} source={insightSnapshot.newsSource} />
+        )}
+      </section>
+
+      <section className={`${css.card} ${css.insightCard}`} data-pool-panel>
+        <div className={css.sectionHeader}>
+          <div>
+            <h2>{t('pool.title')}</h2>
+            <p>{t('pool.subtitle', {
+              date: insightSnapshot?.pool !== undefined && insightSnapshot.pool.asOf !== ''
+                ? insightSnapshot.pool.asOf : '—',
+            })}</p>
+          </div>
+          {insightSnapshot?.pool !== undefined && (
+            <span className={css.count}>{t('pool.count', {
+              holdings: insightSnapshot.pool.holdings.length,
+              watch: insightSnapshot.pool.watchCount,
+            })}</span>
+          )}
+        </div>
+        {insightState.status === 'loading' && <p className={css.emptyBlock}>{t('pool.loading')}</p>}
+        {(insightState.status === 'missing' || insightState.status === 'error'
+          || insightState.status === 'invalid') && (
+          <div className={css.emptyBlock}>
+            <p>{t(insightState.status === 'missing' ? 'pool.missing'
+              : insightState.status === 'invalid' ? 'pool.invalid' : 'pool.error')}</p>
+            <button type="button" className={css.retry} onClick={() => { setReload(value => value + 1) }}>
+              {t('pool.retry')}
+            </button>
+          </div>
+        )}
+        {insightSnapshot !== undefined && insightSnapshot.pool === undefined && (
+          <p className={css.emptyBlock}>{t('pool.empty')}</p>
+        )}
+        {insightSnapshot?.pool !== undefined && (
+          <PoolCard pool={insightSnapshot.pool} t={t} source={insightSnapshot.poolSource} />
+        )}
+      </section>
 
       <section className={`${css.card} ${css.quantCard}`} data-quant-panel>
         <div className={css.sectionHeader}>

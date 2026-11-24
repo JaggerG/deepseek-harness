@@ -559,6 +559,94 @@
   font-size: 11px;
 }
 
+.quantValuation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--dsw-alias-fill-secondary);
+  border: 1px solid var(--dsw-alias-border-secondary);
+}
+
+.quantValuationHead {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.quantValuationTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.quantValuationTier {
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* 估值档位颜色：低估=成功绿，偏高估=错误红 */
+.tierUndervalued { background: var(--dsw-alias-state-success-fill); color: var(--dsw-alias-state-success-primary); }
+.tierBargain     { background: var(--dsw-alias-state-success-fill); color: var(--dsw-alias-state-success-primary); opacity: 0.85; }
+.tierNormal      { background: var(--dsw-alias-fill-tertiary); color: var(--dsw-alias-label-tertiary); }
+.tierRich        { background: var(--dsw-alias-state-error-fill);   color: var(--dsw-alias-state-error-primary); opacity: 0.85; }
+.tierOvervalued  { background: var(--dsw-alias-state-error-fill);   color: var(--dsw-alias-state-error-primary); }
+
+.quantValItem {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.quantValItem > span:first-child {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.quantValItem > strong {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.quantValBar {
+  height: 4px;
+  background: var(--dsw-alias-fill-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.quantValBar > span {
+  display: block;
+  height: 100%;
+  background: var(--dsw-alias-component-checkbox-indeterminate-bg);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.quantValWindow {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--dsw-alias-label-quaternary);
+}
+
+.quantValReasons {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  font-style: italic;
+}
+
 /* 模拟盘占满整行：净值对比整幅，账户卡左右并排。 */
 .page > .simCard {
   grid-column: 1 / -1;
@@ -1085,4 +1173,187 @@
   .chart {
     gap: 8px;
   }
+}
+
+/* 消息面 / 股票池：桌面端左右并排（各半行），窄屏由页面断点自动堆叠。 */
+.page > .insightCard {
+  grid-column: span 4;
+  align-self: start;
+}
+
+/* 半宽卡片里读数用 2×2，避免四个读数挤成一行。 */
+.infoStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.infoStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.infoStat > span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.infoStat strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newsSection {
+  margin-top: 10px;
+}
+
+.newsSection h4,
+.poolSection h4 {
+  margin: 0 0 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.newsHolding {
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.newsHolding + .newsHolding {
+  margin-top: 6px;
+}
+
+.newsHoldingHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.newsName {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newsCode {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.newsHeadline {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.newsMeta {
+  margin-right: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.newsThemes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.newsTheme {
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-base);
+  font-size: 11px;
+}
+
+.newsTheme strong {
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.poolSection + .poolSection {
+  margin-top: 10px;
+}
+
+.poolChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.poolChip {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 3px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+}
+
+.poolChipMuted {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.poolChip strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.poolIcon {
+  font-size: 11px;
+}
+
+.poolList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.poolRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 9px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base);
+}
+
+.poolName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 半宽卡片里日期与来源放到第二行，名称不再被挤。 */
+.poolMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
