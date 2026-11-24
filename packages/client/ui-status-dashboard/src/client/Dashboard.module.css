@@ -1137,6 +1137,21 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .quantValuation {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px 8px;
+    padding: 8px 10px;
+  }
+
+  .quantValuationHead {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .quantValItem > strong {
+    font-size: 12px;
+  }
+
   .quantApex {
     aspect-ratio: 16 / 9;
     min-height: 0;
