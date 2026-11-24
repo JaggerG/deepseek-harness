@@ -283,8 +283,6 @@ interface FundMarker {
   /** 交易当日净值。 */
   readonly y: number
   readonly action: 'buy' | 'sell'
-  readonly date: string
-  readonly amount: number
 }
 
 interface FundChartGeometry {
@@ -292,7 +290,6 @@ interface FundChartGeometry {
   readonly returnUp: readonly ReturnPoint[]
   readonly returnDown: readonly ReturnPoint[]
   readonly markers: readonly FundMarker[]
-  readonly labels: readonly FundMarker[]
   readonly startDate: string
   readonly endDate: string
   readonly rangeReturn: number
@@ -599,23 +596,7 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
       x: toTimestamp(point.date),
       y: point.nav,
       action: trade.action,
-      date: point.date,
-      amount: trade.amount,
     })
-  }
-  // 时间轴密集时只标关键笔：首笔买入、最后一笔，再按金额从大到小补位，且保持最小间距。
-  const labels: FundMarker[] = []
-  const firstBuy = markers.find(marker => marker.action === 'buy')
-  const ranked = [...markers].sort((left, right) =>
-    right.amount - left.amount || left.date.localeCompare(right.date))
-  const labeled = new Set<string>()
-  const minGap = (endTs - startTs) * 0.12
-  for (const candidate of [firstBuy, markers[markers.length - 1], ...ranked]) {
-    if (candidate === undefined || labels.length >= 5) continue
-    const key = `${candidate.date}-${candidate.action}`
-    if (labeled.has(key) || labels.some(label => Math.abs(label.x - candidate.x) < minGap)) continue
-    labeled.add(key)
-    labels.push(candidate)
   }
   const navValues = [...navSeries.map(point => point.y), ...markers.map(marker => marker.y)]
   if (costNav !== undefined) navValues.push(costNav)
@@ -631,7 +612,6 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
     returnUp: up,
     returnDown: down,
     markers,
-    labels,
     startDate: first.date,
     endDate: last.date,
     rangeReturn,
@@ -832,18 +812,6 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
             strokeColor: palette.surface,
             strokeWidth: 0.5,
           },
-          ...(chart.labels.includes(marker) ? {
-            label: {
-              text: `${marker.date.slice(5)} ${t(marker.action === 'buy' ? 'fund.buyShort' : 'fund.sellShort')}`,
-              offsetY: marker.action === 'buy' ? -6 : 10,
-              borderWidth: 0,
-              style: {
-                background: palette.surface,
-                color: marker.action === 'buy' ? palette.error : palette.success,
-                fontSize: '7px',
-              },
-            },
-          } : {}),
         })),
       },
     }

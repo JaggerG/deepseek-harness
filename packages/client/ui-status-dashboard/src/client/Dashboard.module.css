@@ -785,6 +785,18 @@
     align-items: flex-start;
     gap: 2px;
   }
+
+  /* 两张图共用两行（标题 / 图表），左侧多出的均线行不再把图往下顶。 */
+  .fundCharts {
+    grid-template-rows: auto auto;
+  }
+
+  .fundChartBlock {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    row-gap: 2px;
+  }
 }
 
 /* 均线开关：与区间按钮同风格，但更小。 */
