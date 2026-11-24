@@ -350,14 +350,33 @@
   min-height: 0;
 }
 
+/* 区间按钮共用一条滑块背景：5 等分，间距用 margin 表达，滑块按 20% 步进。 */
 .fundRange {
+  position: relative;
   display: flex;
-  gap: 4px;
+  gap: 0;
   margin: 6px 0 2px;
 }
 
+.fundRangeGlider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 20%;
+  box-sizing: border-box;
+  padding: 0 2px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  background-clip: content-box;
+  pointer-events: none;
+}
+
 .fundRangeChip {
+  position: relative;
+  z-index: 1;
   flex: 1;
+  margin: 0 2px;
   padding: 3px 0;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm);
@@ -382,7 +401,6 @@
 .fundRangeChipActive {
   border-color: transparent;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .fundCharts {
@@ -1378,4 +1396,148 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 估算加仓：滑块 + 成本推演 + 复原，虚线框提示这是临时推演。 */
+.fundSim {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 0.5px dashed var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+}
+
+.fundSimLabel {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.fundSimRange {
+  flex: 1 1 110px;
+  min-width: 80px;
+  height: 14px;
+  accent-color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+}
+
+.fundSimAmount {
+  min-width: 56px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.fundSimCost {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fundSimReset {
+  padding: 2px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.fundSimReset:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fundSimHint {
+  flex-basis: 100%;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+/* ── 动效 ────────────────────────────────────────────────────────────
+   只动 transform / opacity；系统开启「减少动态效果」时全部关闭。
+   入场用 backwards 而非 both，避免结束状态压住悬停位移。 */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes cardIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .page > header,
+  .page > section,
+  .split > section {
+    animation: cardIn 240ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  /* 按视觉顺序每张卡错开 40ms。 */
+  .page > .hostCard { animation-delay: 40ms; }
+  .split > .fundCard { animation-delay: 80ms; }
+  .page > [data-news-panel] { animation-delay: 120ms; }
+  .page > [data-pool-panel] { animation-delay: 160ms; }
+  .page > [data-quant-panel] { animation-delay: 200ms; }
+  .page > [data-sim-panel] { animation-delay: 240ms; }
+
+  .card {
+    transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms ease;
+  }
+
+  /* 切换时间维度时图表整体淡入，配合 Apex 的曲线生长。 */
+  @keyframes chartsIn {
+    from { opacity: 0.35; }
+    to { opacity: 1; }
+  }
+
+  .fundCharts {
+    animation: chartsIn 180ms ease-out;
+  }
+
+  .fundChip,
+  .fundRangeChip,
+  .fundMaChip {
+    transition: transform 120ms ease, background-color 120ms ease, color 120ms ease;
+  }
+
+  /* 开关均线时按钮回弹一次。 */
+  @keyframes chipPop {
+    0% { transform: scale(1); }
+    40% { transform: scale(0.94); }
+    100% { transform: scale(1); }
+  }
+
+  .fundMaChipActive {
+    animation: chipPop 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .refresh:active,
+  .retry:active,
+  .fundChip:active,
+  .fundRangeChip:active,
+  .fundMaChip:active {
+    transform: scale(0.96);
+  }
+}
+
+/* 桌面鼠标：卡片轻微上浮；触屏不启用，避免悬停态黏住。 */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 10%);
+  }
+}
+
+@media (hover: none) and (prefers-reduced-motion: no-preference) {
+  .card:active {
+    transform: scale(0.995);
+  }
 }

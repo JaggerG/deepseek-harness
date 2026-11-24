@@ -103,6 +103,32 @@ function useCompactViewport(): boolean {
   return compact
 }
 
+/** 首次拿到数值时从 0 递增；后续刷新直接跳到新值，不重复播放。 */
+function useCountUp(target: number | undefined, duration = 600): number | undefined {
+  const [shown, setShown] = useState(target)
+  const played = useRef(false)
+  useEffect(() => {
+    if (target === undefined) return
+    if (played.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      played.current = true
+      setShown(target)
+      return
+    }
+    played.current = true
+    let frame = 0
+    const start = performance.now()
+    const tick = (now: number): void => {
+      // rAF 的时间戳可能略早于注册时刻，钳制后避免首帧出现负值。
+      const progress = Math.max(0, Math.min(1, (now - start) / duration))
+      setShown(target * (1 - (1 - progress) ** 3))
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(frame) }
+  }, [target, duration])
+  return shown
+}
+
 interface FundTrade {
   readonly date: string
   readonly action: 'buy' | 'sell'
@@ -369,6 +395,10 @@ const FUND_RANGES: readonly { readonly key: FundRangeKey; readonly days: number 
   { key: '1y', days: 365 },
   { key: 'all', days: 0 },
 ]
+
+/** 估算加仓滑块的取值范围与步长（元）。 */
+const ADD_ON_MAX = 50_000
+const ADD_ON_STEP = 500
 
 const FUND_RANGE_LABEL = {
   '1m': 'fund.range1m',
@@ -821,8 +851,14 @@ async function loadInsightState(
   }
 }
 
+/** 按当前净值估算加仓后的持仓成本；只做推演，不写回交易记录。 */
+function simulateAddOn(fund: FundRecord, amount: number): number | undefined {
+  if (!fund.holding || fund.shares <= 0 || fund.cost <= 0 || fund.nav <= 0 || amount <= 0) return undefined
+  return (fund.shares * fund.cost + amount) / (fund.shares + amount / fund.nav)
+}
+
 /** Project a fund's NAV history into a trend series plus a cost-relative return curve. */
-function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometry | undefined {
+function buildFundChart(fund: FundRecord, range: FundRangeKey, costOverride?: number): FundChartGeometry | undefined {
   const history = sliceFundHistory(fund.history, range)
   const first = history[0]
   const last = history[history.length - 1]
@@ -831,8 +867,8 @@ function buildFundChart(fund: FundRecord, range: FundRangeKey): FundChartGeometr
   const endTs = toTimestamp(last.date)
   const navSeries = history.map(point => ({ x: toTimestamp(point.date), y: point.nav }))
   const rangeReturn = last.nav / first.nav - 1
-  // 在持时以成本净值作为收益率基准，成本线即 0%；否则按区间起点归一。
-  const costNav = fund.holding && fund.cost > 0 ? fund.cost : undefined
+  // 在持时以成本净值作为收益率基准，成本线即 0%；估算加仓时用推算成本替换。
+  const costNav = costOverride ?? (fund.holding && fund.cost > 0 ? fund.cost : undefined)
   const baseNav = costNav ?? first.nav
   const returnPoints = history.map(point => ({
     x: toTimestamp(point.date),
@@ -990,7 +1026,13 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
   const [range, setRange] = useState<FundRangeKey>('all')
   const compact = useCompactViewport()
   const [maOn, setMaOn] = useState<readonly MaWindow[]>([10, 60])
-  const chart = useMemo(() => buildFundChart(fund, range), [fund, range])
+  // 估算加仓金额（元）：仅保存在本地状态，不改动持仓与流水。
+  const [addOn, setAddOn] = useState(0)
+  // 切换基金时清掉上一只的推演金额，避免估算结果被带过去。
+  useEffect(() => { setAddOn(0) }, [fund.code])
+  const simCost = useMemo(() => simulateAddOn(fund, addOn), [fund, addOn])
+  const chart = useMemo(() => buildFundChart(fund, range, simCost), [fund, range, simCost])
+  const costLabel = simCost === undefined ? t('fund.costLine') : t('fund.costLineEst')
   const maData = useMemo(
     () => chart === undefined ? undefined : buildMovingAverages(fund.history, toTimestamp(chart.startDate)),
     [fund.history, chart],
@@ -1051,7 +1093,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           borderColor: palette.textMuted,
           strokeDashArray: 4,
           label: {
-            text: t('fund.costLine'),
+            text: costLabel,
             position: 'right',
             textAnchor: 'end',
             offsetX: -4,
@@ -1072,7 +1114,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         })),
       },
     }
-  }, [chart, palette, t, compact, spanDays])
+  }, [chart, palette, costLabel, compact, spanDays])
   const returnOptions = useMemo<ApexOptions>(() => {
     if (chart === undefined) return {}
     const baseline = {
@@ -1129,7 +1171,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         yaxis: [chart.costVisible ? {
           ...baseline,
           label: {
-            text: t('fund.costLine'),
+            text: costLabel,
             // 放在绘图区右端、去掉底框，避免压在坐标轴刻度上。
             position: 'right',
             textAnchor: 'end',
@@ -1140,7 +1182,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         } : baseline],
       },
     }
-  }, [chart, palette, t, compact, spanDays])
+  }, [chart, palette, costLabel, compact, spanDays])
   if (chart === undefined) return <p className={css.emptyBlock}>{t('fund.empty')}</p>
   // 中国习惯：正收益红色，负收益绿色。
   const tone = chart.rangeReturn >= 0 ? css.toneError : css.toneSuccess
@@ -1155,6 +1197,8 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         <span className={tone}>{rangeLabel}</span>
       </div>
       <div className={css.fundRange} role="group" aria-label={t('fund.rangeLabel')}>
+        <span className={css.fundRangeGlider} aria-hidden="true"
+          style={{ transform: `translateX(${Math.max(0, FUND_RANGES.findIndex(item => item.key === range)) * 100}%)` }} />
         {FUND_RANGES.map(item => (
           <button key={item.key} type="button" aria-pressed={range === item.key}
             className={`${css.fundRangeChip} ${range === item.key ? css.fundRangeChipActive : ''}`}
@@ -1163,7 +1207,27 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
           </button>
         ))}
       </div>
-      <div className={css.fundCharts}>
+      {fund.holding && fund.shares > 0 && fund.cost > 0 && (
+        <div className={css.fundSim}>
+          <span className={css.fundSimLabel}>{t('fund.simLabel')}</span>
+          <input className={css.fundSimRange} type="range"
+            min={0} max={ADD_ON_MAX} step={ADD_ON_STEP} value={addOn}
+            aria-label={t('fund.simLabel')}
+            onChange={(event) => { setAddOn(Number(event.target.value)) }} />
+          <span className={css.fundSimAmount}>{t('fund.money', { value: formatNumber(addOn) })}</span>
+          <span className={css.fundSimCost}>
+            {t('fund.cost')} {fund.cost.toFixed(4)}
+            {simCost === undefined ? '' : ` → ${simCost.toFixed(4)}`}
+          </span>
+          <button type="button" className={css.fundSimReset} disabled={addOn === 0}
+            onClick={() => { setAddOn(0) }}>
+            {t('fund.simReset')}
+          </button>
+          <span className={css.fundSimHint}>{t('fund.simHint')}</span>
+        </div>
+      )}
+      {/* key 随区间变化：重挂载触发一次淡入，配合 Apex 的入场动画。 */}
+      <div className={css.fundCharts} key={range}>
         <div className={css.fundChartBlock}>
           <div className={css.fundChartHead}>
             <span className={css.fundChartTitle}>{t('fund.trendTitle')}</span>
@@ -1222,7 +1286,7 @@ function FundChart({ fund, t }: { fund: FundRecord; t: TranslateNS<typeof NS> })
         {chart.costVisible && (
           <span className={css.toneMuted}>
             <span className={`${css.swatch} ${css.toneMuted}`} aria-hidden="true" />
-            {t('fund.costLine')}
+            {costLabel}
           </span>
         )}
       </div>
@@ -1839,6 +1903,11 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
   const activeFund = funds.find(fund => fund.code === selectedFund)
     ?? funds.find(fund => fund.holding)
     ?? funds[0]
+  // 汇总数字首次出现时滚动到目标值。
+  const heldValue = useCountUp(fundSummary?.value)
+  const heldCost = useCountUp(fundSummary?.cost)
+  const heldPnl = useCountUp(fundSummary?.pnl)
+  const heldRate = useCountUp(fundSummary?.rate)
 
   return (
     <div className={css.page} data-status-dashboard>
@@ -1922,22 +1991,22 @@ export function Dashboard({ sessionId, readFile, t }: DashboardProps): ReactNode
               <div className={css.fundSummary}>
                 <div className={css.fundStat}>
                   <span>{t('fund.totalValue')}</span>
-                  <strong>{t('fund.money', { value: formatNumber(fundSummary.value) })}</strong>
+                  <strong>{heldValue === undefined ? '—' : t('fund.money', { value: formatNumber(heldValue) })}</strong>
                 </div>
                 <div className={css.fundStat}>
                   <span>{t('fund.totalCost')}</span>
-                  <strong>{t('fund.money', { value: formatNumber(fundSummary.cost) })}</strong>
+                  <strong>{heldCost === undefined ? '—' : t('fund.money', { value: formatNumber(heldCost) })}</strong>
                 </div>
                 <div className={css.fundStat}>
                   <span>{t('fund.pnl')}</span>
                   <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
-                    {signedMoney(fundSummary.pnl, t)}
+                    {heldPnl === undefined ? '—' : signedMoney(heldPnl, t)}
                   </strong>
                 </div>
                 <div className={css.fundStat}>
                   <span>{t('fund.return')}</span>
                   <strong className={fundSummary.pnl >= 0 ? css.toneError : css.toneSuccess}>
-                    {fundSummary.rate === undefined ? '—' : formatPercent(fundSummary.rate)}
+                    {heldRate === undefined ? '—' : formatPercent(heldRate)}
                   </strong>
                 </div>
               </div>
