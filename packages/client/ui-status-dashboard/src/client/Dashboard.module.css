@@ -1196,6 +1196,13 @@
   align-self: start;
 }
 
+/* 窄屏堆叠到整行，不强制 span 4 以免 grid 扩展出零宽度隐式列。 */
+@media (width < 760px) {
+  .page > .insightCard {
+    grid-column: 1 / -1;
+  }
+}
+
 /* 半宽卡片里读数用 2×2，避免四个读数挤成一行。 */
 .infoStats {
   display: grid;
